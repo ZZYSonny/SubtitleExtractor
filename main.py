@@ -3,7 +3,7 @@ import pickle
 import os
 
 #video_chs_path = "video/chs.mkv"
-video_cht_path = "video/cht_cut.mp4"
+video_cht_path = "video/cht.mp4"
 video_out_path = "video/out.mkv"
 srt_out_path = "video/out.srt"
 

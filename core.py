@@ -21,7 +21,7 @@ class ContourConfig:
 class KeyConfig:
     empty: int = 200
     diff: int = 1000
-    batch: int = 128*3
+    batch: int = 512
     margin: int = 10
     contour = ContourConfig(8,8,2,5)
     device: str = "cuda"
@@ -46,7 +46,7 @@ def subtitle_black_contour(rgb: torch.Tensor, config: ContourConfig):
         mask
     )
     white_conv = F.avg_pool2d(
-        white.float(),
+        white.to(torch.float16),
         kernel_size=config.kernel, 
         padding=config.kernel//2, 
         stride=1,
