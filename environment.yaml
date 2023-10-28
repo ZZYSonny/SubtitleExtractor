@@ -1,0 +1,20 @@
+name: subs
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch=2.1.*=*cuda*
+  - torchvision
+  - av
+  - easyocr
+  # Tools
+  - ipykernel
+  - matplotlib
+  - autopep8
+  - tqdm
+  - pip
+  - pip:
+    - zhconv
