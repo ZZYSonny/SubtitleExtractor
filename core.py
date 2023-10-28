@@ -22,6 +22,7 @@ class KeyConfig:
     empty: int = 200
     diff: int = 1000
     batch: int = 128*3
+    margin: int = 10
     contour = ContourConfig(8,8,2,5)
     device: str = "cuda"
 
@@ -62,6 +63,15 @@ def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
 
 def subtitle_region(rgb: torch.Tensor):
     return rgb[:, -200:, :]
+
+def bound_1d(xs, margin):
+    idx = xs.nonzero()
+    return idx[0].item()-margin, idx[-1].item()+1+margin
+
+def subtitle_bound(frame, edge, margin):
+    r1, r2 = bound_1d(edge.int().sum(dim=1), margin)
+    c1, c2 = bound_1d(edge.int().sum(dim=0), margin)
+    return frame[:, r1:r2, c1:c2]
 
 def subtitle_diff_sum(contours, reference):
     return torch.logical_xor(contours, reference).int().sum(dim=[1,2])
@@ -109,7 +119,7 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
                     # current frame has text
                     logger.info(f"[EVENT]::EMPTY->TEXT {cur_time}")
                     start_time = cur_time
-                    start_frame = frame_batch[i]
+                    start_frame = subtitle_bound(frame_batch[i], edge_batch[i], config.margin).cpu()
                     start_contour = edge_batch[i]
                     diffs_sum = subtitle_diff_sum(edge_batch, start_contour).tolist()
             else:
@@ -127,10 +137,10 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
                         yield {
                             "start": start_time,
                             "end": cur_time,
-                            "frame": start_frame.cpu()
+                            "frame": start_frame
                         }
                         start_time = cur_time
-                        start_frame = frame_batch[i]
+                        start_frame = subtitle_bound(frame_batch[i], edge_batch[i], config.margin).cpu()
                         start_contour = edge_batch[i]
                         diffs_sum = subtitle_diff_sum(edge_batch, start_contour).tolist()
                 else:
@@ -139,7 +149,7 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
                     yield {
                         "start": start_time,
                         "end": cur_time,
-                        "frame": start_frame.cpu()
+                        "frame": start_frame
                     }
                     start_time = None
                     start_frame = None
@@ -157,22 +167,19 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
 def ocr_text_generator(key_frame_generator, config: OCRConfig = OCRConfig()):
     logger = logging.getLogger('KEY')
     reader = easyocr.Reader(['ch_tra', 'en'])
-    for keys in batcher(key_frame_generator, config.batch):
-        images = [
-            key['frame'].permute([1,2,0]).numpy()
-            for key in keys
-        ]
-        results = reader.readtext_batched(
-            images,
-            blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/"
+    for key in key_frame_generator:
+        image = key['frame'].permute([1,2,0]).numpy()
+        res = reader.readtext(
+            image,
+            blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
+            batch_size = config.batch
         )
-        for i, res in enumerate(results):
-            logger.info(f"[OUT] {res}")
-            yield {
-                "start": keys[i]["start"],
-                "end": keys[i]["end"],
-                "ocrs": res
-            }
+        logger.info(f"[OUT] {res}")
+        yield {
+            "start": key["start"],
+            "end": key["end"],
+            "ocrs": res
+        }
 
 def subtitle_from_ocr(ocr_result):
     filtered = [

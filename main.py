@@ -2,22 +2,22 @@ from core import *
 import pickle
 import os
 
-video_cht_path = "video/cht.mp4"
-video_chs_path = "video/chs.mkv"
+#video_chs_path = "video/chs.mkv"
+video_cht_path = "video/cht_cut.mp4"
 video_out_path = "video/out.mkv"
 srt_out_path = "video/out.srt"
 
-#keys = list(key_frame_generator(video_cht_path))
-#pickle.dump(keys, open("debug/pkl/keys.pkl", "wb"))
+keys = list(key_frame_generator(video_cht_path))
+pickle.dump(keys, open("debug/pkl/keys.pkl", "wb"))
 #keys = pickle.load(open("debug/pkl/keys.pkl", "rb"))
 
-#ocrs = list(ocr_text_generator(keys))
+ocrs = list(ocr_text_generator(keys))
 #pickle.dump(ocrs, open("debug/pkl/ocrs.pkl", "wb"))
 #ocrs = pickle.load(open("debug/pkl/ocrs.pkl", "rb"))
 
-#srts = list(srt_entry_generator(ocrs))
-#with open(srt_out_path, "w") as f:
-#    print("\n\n".join(srts), file=f)
+srts = list(srt_entry_generator(ocrs))
+with open(srt_out_path, "w") as f:
+    print("\n\n".join(srts), file=f)
 
 os.system(" ".join([
     f"ffmpeg -y",
