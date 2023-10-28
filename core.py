@@ -186,13 +186,10 @@ def subtitle_from_ocr(ocr_result):
         r for r in ocr_result
         if not r[1].isdigit() and r[0][2][1] - r[0][0][1] > 30
     ]
-    print(filtered)
-    high = max(map(lambda x:x[2], filtered))
     return zhconv.convert("\n".join([
         r[1]
         for r in filtered
-        if r[2] > high / 2
-        or sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= len(r[1])//3
+        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= len(r[1])//3
     ]), locale="zh-cn")
 
 def srt_entry_generator(ocrs):
