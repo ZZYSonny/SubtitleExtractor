@@ -72,7 +72,7 @@ def subtitle_region(rgb: torch.Tensor):
 
 def bound_1d(xs, margin):
     idx = xs.nonzero()
-    return idx[0].item()-margin, idx[-1].item()+1+margin
+    return max(idx[0].item()-margin, 0), min(idx[-1].item()+1+margin, xs.shape[0] - 1)
 
 
 def subtitle_bound(frame, edge, margin):
@@ -99,7 +99,7 @@ def batcher(iter, batch_size):
 
 def key_frame_generator(path, config: KeyConfig = KeyConfig()):
     logger = logging.getLogger('KEY')
-    reader = torchvision.io.VideoReader(path, "video", num_threads=4)
+    reader = torchvision.io.VideoReader(path, "video", num_threads=8)
 
     start_time = 0.0
     start_frame = None
