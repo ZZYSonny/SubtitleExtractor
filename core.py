@@ -40,7 +40,7 @@ KeyConfig1080p1x = KeyConfig(
 KeyConfig1080p2x = KeyConfig(
     50, 250, 256, 16, 10, ContourConfig(32, 32, 2, 3, 2))
 EasyOCRArgs = dict(
-    blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
+    blocklist="~@#$%^&*()_+{}|:<>~`[]\\;/",
     batch_size=2
 )
 
