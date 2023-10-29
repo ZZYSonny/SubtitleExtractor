@@ -10,6 +10,7 @@ from datetime import datetime
 import zhconv
 import itertools
 import os
+import cv2
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -35,9 +36,9 @@ class KeyConfig:
 
 
 KeyConfig1080p1x = KeyConfig(
-    200, 1000, 128, 16, 10, ContourConfig(32, 32, 2, 5, 1))
+    200, 1000, 256, 16, 10, ContourConfig(32, 32, 2, 5, 1))
 KeyConfig1080p2x = KeyConfig(
-    50, 250, 128, 16, 10, ContourConfig(32, 32, 2, 3, 2))
+    50, 250, 256, 16, 10, ContourConfig(32, 32, 2, 3, 2))
 EasyOCRArgs = dict(
     blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
     batch_size=2
@@ -45,9 +46,9 @@ EasyOCRArgs = dict(
 
 def yuv_to_rgb(frames):
     frames = frames.to(torch.float)
-    y = frames[0, :, :]
-    u = frames[1, :, :]
-    v = frames[2, :, :]
+    y = frames[..., 0, :, :]
+    u = frames[..., 1, :, :]
+    v = frames[..., 2, :, :]
 
     y /= 255
     u = u / 255 - 0.5
@@ -57,7 +58,7 @@ def yuv_to_rgb(frames):
     g = y + -0.396 * u - 0.581 * v
     b = y + 2.029 * u
 
-    rgb = torch.stack([r, g, b], 0)
+    rgb = torch.stack([r, g, b], -3)
     rgb = (rgb * 255).clamp(0, 255).to(torch.uint8)
     return rgb
 
@@ -132,8 +133,12 @@ def subtitle_bound(frame, edge, config: KeyConfig):
     c1, c2 = bound_1d(edge.int().sum(dim=0))
     return frame[:, r1:r2, c1:c2]
 
+def get_fps(path):
+    video = cv2.VideoCapture(path)
+    return video.get(cv2.CAP_PROP_FPS)
 
 def key_frame_generator(path, config: KeyConfig):
+    fps=get_fps(path)
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
     stream.add_video_stream(config.batch_edge,
@@ -141,9 +146,10 @@ def key_frame_generator(path, config: KeyConfig):
                             hw_accel="cuda:0",
                             decoder_option={
                                 "crop": "880x0x0x0"
-                            }
+                            },
+                            filter_desc=f"fps={fps}"
                             )
-
+    
     has_start = 0
     start_time = 0.0
     start_frame = torch.empty(0)
@@ -169,8 +175,8 @@ def key_frame_generator(path, config: KeyConfig):
         assert (has_start)
         has_start = False
         return {
-            "start": start_time,
-            "end": cur_time,
+            "start": start_time/fps,
+            "end": cur_time/fps,
             "frame": start_frame
         }
 
@@ -232,7 +238,7 @@ def key_frame_generator(path, config: KeyConfig):
                     logger.info(f"{loc} Text:")
                 else:
                     window_start = window_start + i
-                    yield release_key_frame(window_start)
+                    yield release_key_frame(past_frames+window_start)
 
                     if empty_window_cpu[i].item():
                         logger.info(
@@ -244,6 +250,7 @@ def key_frame_generator(path, config: KeyConfig):
                             past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
 
         past_frames += yuv_batch.shape[0]
+        logger.info("Decoding video")
 
     if has_start:
         yield release_key_frame(past_frames-1)
