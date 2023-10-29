@@ -65,6 +65,7 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
+@torch.compile(mode="max-autotune")
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     y = yuv[:, 0]
     u = yuv[:, 1]
@@ -185,7 +186,7 @@ def key_frame_generator(path, config: KeyConfig):
     logger.info("Decoding video")
     for (yuv_batch, ) in stream.stream():
         logger.info("Computing edges")
-        edge_batch = subtitle_black_contour(yuv_batch, config.contour)
+        edge_batch = subtitle_black_contour(subtitle_region(yuv_batch), config.contour)
         pixels_batch = edge_batch.int().sum(dim=[1, 2])
         empty_batch_cpu = pixels_batch.lt(config.empty).cpu()
 
