@@ -10,7 +10,7 @@ import zhconv
 import itertools
 import os
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 
 
 @dataclass
@@ -43,7 +43,7 @@ EasyOCRArgs = dict(
 )
 
 
-@torch.compile(mode="max-autotune")
+#@torch.compile(mode="max-autotune")
 def subtitle_black_contour(rgb: torch.Tensor, config: ContourConfig):
     channel_dim = 1
     r = rgb.select(channel_dim, 0).unsqueeze(channel_dim)
@@ -60,18 +60,15 @@ def subtitle_black_contour(rgb: torch.Tensor, config: ContourConfig):
         white_cnt_scaled = white_mask.to(torch.float16)
         black_mask_scaled = black_mask
     else:
+        dtype = torch.float16 if rgb.device.type == "cuda" else torch.float32
         white_cnt_scaled = F.avg_pool2d(
-            white_mask.to(torch.float16),
+            white_mask.to(dtype),
             kernel_size=config.scale,
-            padding=config.scale//2,
-            stride=1,
             divisor_override=1
         )
         black_mask_scaled = F.avg_pool2d(
-            black_mask.to(torch.float16),
+            black_mask.to(dtype),
             kernel_size=config.scale,
-            padding=config.scale//2,
-            stride=1,
             divisor_override=1
         ) > 0.5
     white_conv = F.avg_pool2d(
@@ -104,7 +101,7 @@ def subtitle_bound(frame, edge, config: KeyConfig):
             0
         ), min(
             config.contour.scale * idx[-1].item()+1+config.margin,
-            xs.shape[0] - 1
+            config.contour.scale * xs.shape[0] - 1
         )
 
     r1, r2 = bound_1d(edge.int().sum(dim=1))
@@ -160,7 +157,8 @@ def key_frame_generator(path, config: KeyConfig):
         logger.info("Computing edges")
         edge_batch = subtitle_black_contour(
             stack_frames(frame_batch), config.contour)
-        empty_batch = edge_batch.int().sum(dim=[1, 2]).lt(config.empty).cpu()
+        pixels_batch = edge_batch.int().sum(dim=[1, 2])
+        empty_batch = pixels_batch.lt(config.empty).cpu()
 
         logger.info("Batch Ready")
         window_start = 0
@@ -175,6 +173,9 @@ def key_frame_generator(path, config: KeyConfig):
                     last_batch = frame_batch[window_start:]
                     break
                 elif window_start == len(frame_batch):
+                    if has_start:
+                        cur_time = frame_batch[-1]["pts"]
+                        yield release_key_frame(cur_time)
                     logger.info(f"Finished.")
                     return
                 else:
@@ -184,17 +185,20 @@ def key_frame_generator(path, config: KeyConfig):
             loc = f"{frame_batch[window_start]['pts']:.2f} -> {frame_batch[window_end-1]['pts']:.2f}"
 
             if not has_start:
+                logger.debug("="*20)
+                logger.debug(f"{loc} Pixs:\n{pixels_batch[window_start:window_end].tolist()}\n")
+                
                 non_empty_window = torch.logical_not(
                     empty_batch[window_start:window_end])
                 i = non_empty_window.nonzero_static(
                     size=1, fill_value=-1).item()
                 if i == -1:
                     window_start = window_end
-                    logger.info(f"{loc} Empty: No Change")
+                    logger.info(f"{loc} Empty:")
                 else:
                     window_start = window_start + i
                     logger.info(
-                        f"{loc} Empty -> Text at {frame_batch[window_start]['pts']}")
+                        f"{loc} Empty -> Text at {frame_batch[window_start]['pts']:.2f}")
                     select_key_frame(
                         frame_batch[window_start]["pts"], frame_batch[window_start]["data"], edge_batch[window_start])
             else:
@@ -206,10 +210,14 @@ def key_frame_generator(path, config: KeyConfig):
                 empty_window = empty_batch[window_start:window_end]
                 stop_window = torch.logical_or(changed_window, empty_window)
 
+                logger.debug("="*20)
+                logger.debug(f"{loc} Pixs:\n{pixels_batch[window_start:window_end].tolist()}\n")
+                logger.debug(f"{loc} Diff:\n{diff_window.tolist()}\n")
+
                 i = stop_window.nonzero_static(size=1, fill_value=-1).item()
                 if i == -1:
                     window_start = window_end
-                    logger.info(f"{loc} Text: No Change")
+                    logger.info(f"{loc} Text:")
                 else:
                     window_start = window_start + i
                     cur_time = frame_batch[window_start]['pts']
