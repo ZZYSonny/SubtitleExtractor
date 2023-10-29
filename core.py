@@ -7,6 +7,8 @@ from tqdm import tqdm
 import easyocr
 from datetime import datetime
 import zhconv
+import itertools
+import os
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,14 +26,17 @@ class ContourConfig:
 class KeyConfig:
     empty: int
     diff: int
-    batch: int
+    batch_edge: int
+    batch_window: int
     margin: int
     contour: ContourConfig
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = "cuda"  # "cuda" if torch.cuda.is_available() else "cpu"
 
 
-KeyConfig1080p1x = KeyConfig(200, 1000, 512, 10, ContourConfig(8, 8, 2, 5, 1))
-KeyConfig1080p2x = KeyConfig(50, 250, 512, 10, ContourConfig(8, 8, 2, 3, 2))
+KeyConfig1080p1x = KeyConfig(
+    200, 1000, 512, 16, 10, ContourConfig(8, 8, 2, 5, 1))
+KeyConfig1080p2x = KeyConfig(
+    50, 250, 512, 16, 10, ContourConfig(8, 8, 2, 3, 2))
 EasyOCRArgs = dict(
     blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
     batch_size=2
@@ -92,7 +97,7 @@ def subtitle_region(rgb: torch.Tensor):
 
 
 def subtitle_bound(frame, edge, config: KeyConfig):
-    def bound_1d(xs,):
+    def bound_1d(xs):
         idx = xs.nonzero()
         return max(
             config.contour.scale * idx[0].item()-config.margin,
@@ -107,98 +112,115 @@ def subtitle_bound(frame, edge, config: KeyConfig):
     return frame[:, r1:r2, c1:c2]
 
 
-def subtitle_diff_sum(contours, reference):
-    return torch.logical_xor(contours, reference).int().sum(dim=[1, 2])
-
-
-def batcher(iter, batch_size):
-    global config
-    bufs = []
-    for x in iter:
-        bufs.append(x)
-        if len(bufs) == batch_size:
-            yield bufs
-            bufs = []
-    if len(bufs) > 0:
-        yield bufs
-
-
 def key_frame_generator(path, config: KeyConfig):
     logger = logging.getLogger('KEY')
     reader = torchvision.io.VideoReader(path, "video", num_threads=8)
 
+    has_start = 0
     start_time = 0.0
-    start_frame = None
-    start_contour = None
+    start_frame = torch.empty(0)
+    start_edge = torch.empty(0)
 
-    for video_frames in batcher(reader, config.batch):
-        edge_batch = subtitle_black_contour(torch.stack([
-            subtitle_region(frame["data"])
-            for frame in video_frames
-        ]).to(config.device), config.contour)
-        edge_sum = edge_batch.int().sum(dim=[1, 2]).tolist()
+    def select_key_frame(cur_time, cur_frame, cur_edge):
+        nonlocal has_start, start_time, start_frame, start_edge
+        assert (not has_start)
+        has_start = True
+        start_time = cur_time
+        # Clone edge so that in the next batch, previous edge_batch
+        # can be deleted.
+        start_frame = subtitle_bound(
+            subtitle_region(cur_frame),
+            cur_edge,
+            config
+        ).clone()
+        start_edge = cur_edge.clone()
 
-        if start_contour is not None:
-            diffs_sum = subtitle_diff_sum(edge_batch, start_contour).tolist()
-        else:
-            diffs_sum = None
-
-        for i in range(len(video_frames)):
-            cur_time = video_frames[i]["pts"]
-            if start_contour is None:
-                logger.info(f"[STATS] i={cur_time} pix={edge_sum[i]}")
-                # no starting frame
-                if edge_sum[i] > config.empty:
-                    # current frame has text
-                    logger.info(f"[EVENT]::EMPTY->TEXT {cur_time}")
-                    start_time = cur_time
-                    start_frame = subtitle_bound(
-                        subtitle_region(video_frames[i]["data"]), edge_batch[i], config).cpu()
-                    start_contour = edge_batch[i].clone()
-                    diffs_sum = subtitle_diff_sum(
-                        edge_batch, start_contour).tolist()
-            else:
-                assert (start_time is not None)
-                assert (start_frame is not None)
-                assert (start_contour is not None)
-                assert (diffs_sum is not None)
-                logger.info(f"[STATS] i={cur_time} diff={diffs_sum[i]}")
-                # has starting frame
-                if edge_sum[i] > config.empty:
-                    # current frame has text
-                    if diffs_sum[i] > config.diff:
-                        # Current frame differs
-                        logger.info(f"[EVENT]::TEXT->NEW TEXT {cur_time}")
-                        yield {
-                            "start": start_time,
-                            "end": cur_time,
-                            "frame": start_frame
-                        }
-                        start_time = cur_time
-                        start_frame = subtitle_bound(
-                            subtitle_region(video_frames[i]["data"]), edge_batch[i], config).cpu()
-                        start_contour = edge_batch[i].clone()
-                        diffs_sum = subtitle_diff_sum(
-                            edge_batch, start_contour).tolist()
-                else:
-                    # current frame has no text
-                    logger.info(f"[EVENT]::TEXT->EMPTY {cur_time}")
-                    yield {
-                        "start": start_time,
-                        "end": cur_time,
-                        "frame": start_frame
-                    }
-                    start_time = None
-                    start_frame = None
-                    start_contour = None
-
-    if start_frame is not None:
-        assert (start_contour is not None)
-        yield {
+    def release_key_frame(cur_time):
+        nonlocal has_start
+        assert (has_start)
+        has_start = False
+        return {
             "start": start_time,
             "end": cur_time,
             "frame": start_frame
         }
+
+    def stack_frames(batch):
+        return torch.stack([
+            subtitle_region(frame["data"])
+            for frame in batch
+        ]).to(config.device)
+
+    last_batch = []
+    while True:
+        logger.info("Decoding videos")
+        new_batch = list(itertools.islice(reader, config.batch_edge - len(last_batch)))
+        frame_batch = last_batch + new_batch
+
+        logger.info("Computing edges")
+        edge_batch = subtitle_black_contour(
+            stack_frames(frame_batch), config.contour)
+        empty_batch = edge_batch.int().sum(dim=[1, 2]).lt(config.empty).cpu()
+
+        logger.info("Batch Ready")
+        window_start = 0
+        while True:
+            # Determine current window [cur_start, cur_end]
+            window_end = window_start + config.batch_window
+
+            if window_end > len(frame_batch):
+                if len(frame_batch) == config.batch_edge:
+                    logger.info(
+                        f"Window outside Batch. Leave {window_start}:{config.batch_edge} to next batch.")
+                    last_batch = frame_batch[window_start:]
+                    break
+                elif window_start == len(frame_batch):
+                    logger.info(f"Finished.")
+                    return
+                else:
+                    window_end = len(frame_batch)
+                    logger.info(f"Last batch and window outside batch. Do the last {window_start}:{window_end}")
+
+            loc = f"{frame_batch[window_start]['pts']:.2f} -> {frame_batch[window_end-1]['pts']:.2f}"
+
+            if not has_start:
+                non_empty_window = torch.logical_not(
+                    empty_batch[window_start:window_end])
+                i = non_empty_window.nonzero_static(
+                    size=1, fill_value=-1).item()
+                if i == -1:
+                    window_start = window_end
+                    logger.info(f"{loc} Empty: No Change")
+                else:
+                    window_start = window_start + i
+                    logger.info(
+                        f"{loc} Empty -> Text at {frame_batch[window_start]['pts']}")
+                    select_key_frame(
+                        frame_batch[window_start]["pts"], frame_batch[window_start]["data"], edge_batch[window_start])
+            else:
+                # Compute diff
+                edge_window = edge_batch[window_start:window_end]
+                diff_window = torch.logical_xor(
+                    edge_window, start_edge).int().sum(dim=[1, 2])
+                changed_window = diff_window.gt(config.diff).cpu()
+                empty_window = empty_batch[window_start:window_end]
+                stop_window = torch.logical_or(changed_window, empty_window)
+
+                i = stop_window.nonzero_static(size=1, fill_value=-1).item()
+                if i == -1:
+                    window_start = window_end
+                    logger.info(f"{loc} Text: No Change")
+                else:
+                    window_start = window_start + i
+                    cur_time = frame_batch[window_start]['pts']
+                    yield release_key_frame(cur_time)
+
+                    if empty_window[i].item():
+                        logger.info(f"{loc} Text -> Empty  at {cur_time:2f}")
+                    else:
+                        logger.info(f"{loc} Text -> Changed at {cur_time:2f}")
+                        select_key_frame(
+                            cur_time, frame_batch[window_start]["data"], edge_batch[window_start])
 
 
 def ocr_text_generator(key_frame_generator, easyocr_args: dict):
@@ -206,7 +228,7 @@ def ocr_text_generator(key_frame_generator, easyocr_args: dict):
     reader = easyocr.Reader(['ch_tra', 'en'])
     for key in key_frame_generator:
         image = key['frame'].permute([1, 2, 0]).numpy()
-        res = reader.readtext(image,**easyocr_args)
+        res = reader.readtext(image, **easyocr_args)
         logger.info(f"[OUT] {res}")
         yield {
             "start": key["start"],
@@ -263,22 +285,24 @@ def srt_entry_generator(ocrs):
 
 
 def debug_contour(path, config: KeyConfig):
+    os.system("rm debug/img/*.png")
     reader = torchvision.io.VideoReader(path, "video")
 
     for i, video_frame in enumerate(reader):
         frame = video_frame["data"]
-        torchvision.io.write_png(frame, f"img/{i}.png")
+        torchvision.io.write_png(frame, f"debug/img/{i}.png")
         edge = subtitle_black_contour_single(frame, config.contour)
         if edge.int().sum() > config.empty:
             torchvision.io.write_png(
-                (edge*255).unsqueeze(0).to(torch.uint8), f"img/{i}_.png")
+                (edge*255).unsqueeze(0).to(torch.uint8), f"debug/img/{i}_.png")
 
 
 def debug_key(key_frame_generator, config: KeyConfig):
+    os.system("rm debug/key/*.png")
     for i, key in enumerate(key_frame_generator):
         frame = key["frame"]
         edge = subtitle_black_contour_single(
             frame, config.contour).to(torch.uint8)
-        torchvision.io.write_png(frame, f"key/{i}.png")
+        torchvision.io.write_png(frame, f"debug/key/{i}.png")
         torchvision.io.write_png(
-            (edge*255).unsqueeze(0).to(torch.uint8), f"key/{i}_.png")
+            (edge*255).unsqueeze(0).to(torch.uint8), f"debug/key/{i}_.png")
