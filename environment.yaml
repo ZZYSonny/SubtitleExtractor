@@ -8,6 +8,7 @@ dependencies:
   - python=3.10
   - pytorch=2.1.*=*cuda*
   - torchvision
+  - torchaudio
   - av
   - easyocr
   - ffmpeg
