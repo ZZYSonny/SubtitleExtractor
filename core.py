@@ -17,39 +17,60 @@ class ContourConfig:
     black: int
     near: int
     kernel: int
+    scale: int
 
 
 @dataclass
 class KeyConfig:
-    empty: int = 200
-    diff: int = 1000
-    batch: int = 512
-    margin: int = 10
-    contour = ContourConfig(8, 8, 2, 5)
-    device: str = "cuda"
+    empty: int
+    diff: int
+    batch: int
+    margin: int
+    contour: ContourConfig
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-@dataclass
-class OCRConfig:
-    batch: int = 2
-    min_conf: float = 0.3
+KeyConfig1080p1x = KeyConfig(200, 1000, 512, 10, ContourConfig(8, 8, 2, 5, 1))
+KeyConfig1080p2x = KeyConfig(50, 250, 512, 10, ContourConfig(8, 8, 2, 3, 2))
+EasyOCRArgs = dict(
+    blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
+    batch_size=2
+)
 
 
 @torch.compile(mode="max-autotune")
 def subtitle_black_contour(rgb: torch.Tensor, config: ContourConfig):
     channel_dim = 1
     r = rgb.select(channel_dim, 0).unsqueeze(channel_dim)
-    mask = rgb.eq(r).all(dim=channel_dim)
-    white = torch.logical_and(
+    grey_mask = rgb.eq(r).all(dim=channel_dim)
+    white_mask = torch.logical_and(
         rgb.gt(255 - config.white).all(dim=channel_dim),
-        mask
+        grey_mask
     )
-    black = torch.logical_and(
+    black_mask = torch.logical_and(
         rgb.lt(config.black).all(dim=channel_dim),
-        mask
+        grey_mask
     )
+    if config.scale == 1:
+        white_cnt_scaled = white_mask.to(torch.float16)
+        black_mask_scaled = black_mask
+    else:
+        white_cnt_scaled = F.avg_pool2d(
+            white_mask.to(torch.float16),
+            kernel_size=config.scale,
+            padding=config.scale//2,
+            stride=1,
+            divisor_override=1
+        )
+        black_mask_scaled = F.avg_pool2d(
+            black_mask.to(torch.float16),
+            kernel_size=config.scale,
+            padding=config.scale//2,
+            stride=1,
+            divisor_override=1
+        ) > 0.5
     white_conv = F.avg_pool2d(
-        white.to(torch.float16),
+        white_cnt_scaled,
         kernel_size=config.kernel,
         padding=config.kernel//2,
         stride=1,
@@ -57,7 +78,7 @@ def subtitle_black_contour(rgb: torch.Tensor, config: ContourConfig):
     )
     final = torch.logical_and(
         white_conv.gt(config.near - 0.5),
-        black
+        black_mask_scaled
     )
     return final
 
@@ -70,14 +91,19 @@ def subtitle_region(rgb: torch.Tensor):
     return rgb[:, -200:, :]
 
 
-def bound_1d(xs, margin):
-    idx = xs.nonzero()
-    return max(idx[0].item()-margin, 0), min(idx[-1].item()+1+margin, xs.shape[0] - 1)
+def subtitle_bound(frame, edge, config: KeyConfig):
+    def bound_1d(xs,):
+        idx = xs.nonzero()
+        return max(
+            config.contour.scale * idx[0].item()-config.margin,
+            0
+        ), min(
+            config.contour.scale * idx[-1].item()+1+config.margin,
+            xs.shape[0] - 1
+        )
 
-
-def subtitle_bound(frame, edge, margin):
-    r1, r2 = bound_1d(edge.int().sum(dim=1), margin)
-    c1, c2 = bound_1d(edge.int().sum(dim=0), margin)
+    r1, r2 = bound_1d(edge.int().sum(dim=1))
+    c1, c2 = bound_1d(edge.int().sum(dim=0))
     return frame[:, r1:r2, c1:c2]
 
 
@@ -97,7 +123,7 @@ def batcher(iter, batch_size):
         yield bufs
 
 
-def key_frame_generator(path, config: KeyConfig = KeyConfig()):
+def key_frame_generator(path, config: KeyConfig):
     logger = logging.getLogger('KEY')
     reader = torchvision.io.VideoReader(path, "video", num_threads=8)
 
@@ -127,7 +153,7 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
                     logger.info(f"[EVENT]::EMPTY->TEXT {cur_time}")
                     start_time = cur_time
                     start_frame = subtitle_bound(
-                        subtitle_region(video_frames[i]["data"]), edge_batch[i], config.margin).cpu()
+                        subtitle_region(video_frames[i]["data"]), edge_batch[i], config).cpu()
                     start_contour = edge_batch[i].clone()
                     diffs_sum = subtitle_diff_sum(
                         edge_batch, start_contour).tolist()
@@ -150,7 +176,7 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
                         }
                         start_time = cur_time
                         start_frame = subtitle_bound(
-                            subtitle_region(video_frames[i]["data"]), edge_batch[i], config.margin).cpu()
+                            subtitle_region(video_frames[i]["data"]), edge_batch[i], config).cpu()
                         start_contour = edge_batch[i].clone()
                         diffs_sum = subtitle_diff_sum(
                             edge_batch, start_contour).tolist()
@@ -175,16 +201,12 @@ def key_frame_generator(path, config: KeyConfig = KeyConfig()):
         }
 
 
-def ocr_text_generator(key_frame_generator, config: OCRConfig = OCRConfig()):
+def ocr_text_generator(key_frame_generator, easyocr_args: dict):
     logger = logging.getLogger('KEY')
     reader = easyocr.Reader(['ch_tra', 'en'])
     for key in key_frame_generator:
         image = key['frame'].permute([1, 2, 0]).numpy()
-        res = reader.readtext(
-            image,
-            blocklist="~@#$%^&*()_+{}|:\"<>~`[]\\;'/",
-            batch_size=config.batch
-        )
+        res = reader.readtext(image,**easyocr_args)
         logger.info(f"[OUT] {res}")
         yield {
             "start": key["start"],
@@ -240,7 +262,7 @@ def srt_entry_generator(ocrs):
     ])
 
 
-def debug_contour(path, config: KeyConfig = KeyConfig()):
+def debug_contour(path, config: KeyConfig):
     reader = torchvision.io.VideoReader(path, "video")
 
     for i, video_frame in enumerate(reader):
@@ -252,7 +274,7 @@ def debug_contour(path, config: KeyConfig = KeyConfig()):
                 (edge*255).unsqueeze(0).to(torch.uint8), f"img/{i}_.png")
 
 
-def debug_key(key_frame_generator, config: KeyConfig = KeyConfig()):
+def debug_key(key_frame_generator, config: KeyConfig):
     for i, key in enumerate(key_frame_generator):
         frame = key["frame"]
         edge = subtitle_black_contour_single(
