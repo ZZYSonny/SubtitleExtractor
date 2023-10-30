@@ -1,4 +1,7 @@
 debug
 video
+temp
 __pycache__
 *.srt
+*.mp4
+*.mkv

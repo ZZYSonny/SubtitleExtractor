@@ -35,15 +35,6 @@ class KeyConfig:
     device: str = "cuda"  # "cuda" if torch.cuda.is_available() else "cpu"
 
 
-KeyConfig1080p1x = KeyConfig(
-    200, 1000, 512, 16, 10, ContourConfig(32, 32, 2, 5, 1))
-KeyConfig1080p2x = KeyConfig(
-    50, 250, 512, 16, 10, ContourConfig(32, 32, 2, 3, 2))
-EasyOCRArgs = dict(
-    blocklist="~@#$%^&*_-+={}[]|\\:;\"\'<>/",
-    batch_size=4
-)
-
 def yuv_to_rgb(frames):
     frames = frames.to(torch.float)
     y = frames[..., 0, :, :]
@@ -259,6 +250,7 @@ def key_frame_generator(path, config: KeyConfig):
 
 def ocr_text_generator(key_frame_generator, easyocr_args: dict):
     logger = logging.getLogger('KEY')
+    logger.info("Loading EasyOCR Model")
     reader = easyocr.Reader(['ch_tra', 'en'])
     for key in key_frame_generator:
         image = key['frame'].permute([1, 2, 0]).numpy()
