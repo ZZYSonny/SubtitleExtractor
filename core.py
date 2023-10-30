@@ -36,12 +36,12 @@ class KeyConfig:
 
 
 KeyConfig1080p1x = KeyConfig(
-    200, 1000, 256, 16, 10, ContourConfig(32, 32, 2, 5, 1))
+    200, 1000, 512, 16, 10, ContourConfig(32, 32, 2, 5, 1))
 KeyConfig1080p2x = KeyConfig(
-    50, 250, 256, 16, 10, ContourConfig(32, 32, 2, 3, 2))
+    50, 250, 512, 16, 10, ContourConfig(32, 32, 2, 3, 2))
 EasyOCRArgs = dict(
-    blocklist="~@#$%^&*()_-+{}|:<>~`[]\\;/",
-    batch_size=2
+    blocklist="~@#$%^&*_-+={}[]|\\:;\"\'<>/",
+    batch_size=4
 )
 
 def yuv_to_rgb(frames):
