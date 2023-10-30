@@ -11,9 +11,10 @@ import zhconv
 import itertools
 import os
 import cv2
+from tqdm import tqdm
 
-logging.basicConfig(level=logging.DEBUG)
-
+LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
+logging.basicConfig(level=LOGLEVEL)
 
 @dataclass
 class ContourConfig:
@@ -53,8 +54,10 @@ def yuv_to_rgb(frames):
     rgb = (rgb * 255).clamp(0, 255).to(torch.uint8)
     return rgb
 
+
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
+
 
 @torch.compile(mode="max-autotune")
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
@@ -62,15 +65,15 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     u = yuv[:, 1]
     v = yuv[:, 2]
     grey_mask = torch.logical_and(
-        u==128,
-        v==128
+        u == 128,
+        v == 128
     )
     white_mask = torch.logical_and(
-        y>255-config.white,
+        y > 255-config.white,
         grey_mask
     )
     black_mask = torch.logical_and(
-        y<config.black,
+        y < config.black,
         grey_mask
     )
     dtype = torch.float16 if yuv.device.type == "cuda" else torch.float32
@@ -125,12 +128,18 @@ def subtitle_bound(frame, edge, config: KeyConfig):
     c1, c2 = bound_1d(edge.int().sum(dim=0))
     return frame[:, r1:r2, c1:c2]
 
+
 def get_fps(path):
     video = cv2.VideoCapture(path)
     return video.get(cv2.CAP_PROP_FPS)
 
+def get_batch_num(path, config):
+    video = cv2.VideoCapture(path)
+    length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+    return int((length + config.batch_edge - 1) // config.batch_edge)
+
 def key_frame_generator(path, config: KeyConfig):
-    fps=get_fps(path)
+    fps = get_fps(path)
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
     stream.add_video_stream(config.batch_edge,
@@ -141,7 +150,7 @@ def key_frame_generator(path, config: KeyConfig):
                             },
                             filter_desc=f"fps={fps}"
                             )
-    
+
     has_start = 0
     start_time = 0.0
     start_frame = torch.empty(0)
@@ -175,9 +184,10 @@ def key_frame_generator(path, config: KeyConfig):
     past_frames = 0
 
     logger.info("Decoding video")
-    for (yuv_batch, ) in stream.stream():
+    for (yuv_batch, ) in tqdm(stream.stream(), total=get_batch_num(path, config), desc="Key"):
         logger.info("Computing edges")
-        edge_batch = subtitle_black_contour(subtitle_region(yuv_batch), config.contour)
+        edge_batch = subtitle_black_contour(
+            subtitle_region(yuv_batch), config.contour)
         pixels_batch = edge_batch.int().sum(dim=[1, 2])
         empty_batch_cpu = pixels_batch.lt(config.empty).cpu()
 
@@ -193,7 +203,7 @@ def key_frame_generator(path, config: KeyConfig):
             if not has_start:
                 logger.debug("="*20)
                 logger.debug(
-                    f"{loc} Pixs:\n{pixels_batch[window_start:window_end].tolist()}\n")
+                    f"%s Pixs:\n%s\n", loc, pixels_batch[window_start:window_end].tolist())
 
                 non_empty_window_cpu = torch.logical_not(
                     empty_batch_cpu[window_start:window_end])
@@ -201,11 +211,11 @@ def key_frame_generator(path, config: KeyConfig):
                     size=1, fill_value=-1).item()
                 if i == -1:
                     window_start = window_end
-                    logger.info(f"{loc} Empty:")
+                    logger.info("%s Empty:", loc)
                 else:
                     window_start = window_start + i
-                    logger.info(
-                        f"{loc} Empty -> Text at Frame {window_start}")
+                    logger.info("%s Empty -> Text at Frame %s",
+                                loc, window_start)
                     select_key_frame(
                         past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
             else:
@@ -227,17 +237,17 @@ def key_frame_generator(path, config: KeyConfig):
                     size=1, fill_value=-1).item()
                 if i == -1:
                     window_start = window_end
-                    logger.info(f"{loc} Text:")
+                    logger.info("%s Text:", loc)
                 else:
                     window_start = window_start + i
                     yield release_key_frame(past_frames+window_start)
 
                     if empty_window_cpu[i].item():
-                        logger.info(
-                            f"{loc} Text -> Empty  at Frame {window_start}")
+                        logger.info("%s Text -> Empty  at Frame %s",
+                                    loc, window_start)
                     else:
-                        logger.info(
-                            f"{loc} Text -> Changed at Frame {window_start}")
+                        logger.info("%s Text -> Changed at Frame %s",
+                                    loc, window_start)
                         select_key_frame(
                             past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
 
@@ -249,13 +259,13 @@ def key_frame_generator(path, config: KeyConfig):
 
 
 def ocr_text_generator(key_frame_generator, easyocr_args: dict):
-    logger = logging.getLogger('KEY')
+    logger = logging.getLogger('OCR')
     logger.info("Loading EasyOCR Model")
     reader = easyocr.Reader(['ch_tra', 'en'])
-    for key in key_frame_generator:
+    for key in tqdm(key_frame_generator, desc="OCR"):
         image = key['frame'].permute([1, 2, 0]).numpy()
         res = reader.readtext(image, **easyocr_args)
-        logger.info(f"[OUT] {res}")
+        logger.info("%s", res)
         yield {
             "start": key["start"],
             "end": key["end"],
@@ -263,15 +273,12 @@ def ocr_text_generator(key_frame_generator, easyocr_args: dict):
         }
 
 
-def subtitle_from_ocr(ocr_result):
-    filtered = [
-        r for r in ocr_result
-        if not r[1].isdigit() and r[0][2][1] - r[0][0][1] > 30
-    ]
+def text_for_subtitle(ocr_result):
     return zhconv.convert("\n".join([
         r[1]
-        for r in filtered
-        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= len(r[1])//3
+        for r in ocr_result
+        if not r[1].isdigit() and r[0][2][1] - r[0][0][1] > 30
+        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= len(r[1])//4
     ]), locale="zh-cn")
 
 
@@ -283,7 +290,7 @@ def srt_entry_generator(ocrs):
     for i, ocr in enumerate(ocrs):
         cur_start = ocr["start"]
         cur_end = ocr["end"]
-        cur_text = subtitle_from_ocr(ocr["ocrs"])
+        cur_text = text_for_subtitle(ocr["ocrs"])
         if last_text == cur_text and cur_start - last_end < 0.1:
             last_end = cur_end
         else:
@@ -325,7 +332,8 @@ def debug_contour(path, config: KeyConfig):
         rgb_batch = yuv_to_rgb(yuv_batch)
         torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
         edge = subtitle_black_contour(yuv_batch, config.contour)
-        torchvision.io.write_png(bool_to_grey(edge).cpu(), f"debug/img/{i}_.png")
+        torchvision.io.write_png(bool_to_grey(
+            edge).cpu(), f"debug/img/{i}_.png")
 
 
 def debug_key(key_frame_generator, config: KeyConfig):

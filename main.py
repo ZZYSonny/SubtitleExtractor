@@ -88,6 +88,6 @@ def print_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-download_anime_by_name("星靈")
+#download_anime_by_name("星靈")
 convert_subtitle()
 print_and_serve()
