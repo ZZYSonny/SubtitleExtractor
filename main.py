@@ -26,8 +26,6 @@ EasyOCRArgs = dict(
 
 class DownloadProgressBar(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
-        if tsize is not None:
-            self.total = tsize
         self.update(b * bsize - self.n)
 
 
@@ -44,10 +42,14 @@ def download_anime_by_name(name: str):
     for item in ET.parse(RSS_PATH).getroot().findall('./channel/item'):
         title = item.find("title").text
         link = item.find("link").text
+        size_elem = [child for child in item if child.tag.endswith("size")]
+        size = None
+        if len(size_elem)==1:
+            size = int(float(size_elem[0].text.split(" ")[0])*1024*1024)
 
         if name in title:
             print(f"发现视频 {title}")
-            with DownloadProgressBar(unit='B', unit_scale=True,
+            with DownloadProgressBar(unit='B', unit_scale=True, total=size,
                                      miniters=1, desc="下载视频") as t:
                 urllib.request.urlretrieve(
                     link, filename=IN_VIDEO_PATH, reporthook=t.update_to)
@@ -88,6 +90,6 @@ def print_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-#download_anime_by_name("星靈")
+download_anime_by_name("星靈")
 convert_subtitle()
 print_and_serve()
