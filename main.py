@@ -14,9 +14,19 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    200, 1000, 512, 16, 10, ContourConfig(32, 32, 2, 5, 1))
-KeyExtractorConfig1080p2x = KeyConfig(
-    50, 250, 512, 16, 10, ContourConfig(32, 32, 2, 3, 2))
+    empty=200, 
+    diff=1000, 
+    batch_edge=512, 
+    batch_window=16, 
+    margin=10, 
+    contour=ContourConfig(
+        white=32, 
+        black=32, 
+        near=2, 
+        kernel=5, 
+        scale=1
+    )
+)
 KeyExtractorConfig = KeyExtractorConfig1080p1x
 EasyOCRArgs = dict(
     blocklist="~@#$%^&*_-+={}[]|\\:;<>/",
