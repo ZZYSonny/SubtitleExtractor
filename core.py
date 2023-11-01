@@ -16,6 +16,7 @@ from tqdm import tqdm
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
 
+
 @dataclass
 class ContourConfig:
     white: int
@@ -132,12 +133,12 @@ def subtitle_bound(frame, edge, config: KeyConfig):
 def key_frame_generator(path, config: KeyConfig):
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
-    
+
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
     num_batch = int((num_frame + config.batch_edge - 1) // config.batch_edge)
-    assert(info.codec == "h264")
-    assert(info.format == "yuv420p")
+    assert (info.codec == "h264")
+    assert (info.format == "yuv420p")
 
     fps = info.frame_rate
     stream.add_video_stream(config.batch_edge,
@@ -147,7 +148,7 @@ def key_frame_generator(path, config: KeyConfig):
                                 "crop": "880x0x0x0"
                             },
                             filter_desc=f"fps={fps}"
-                            )    
+                            )
 
     has_start = 0
     start_time = 0
@@ -199,9 +200,10 @@ def key_frame_generator(path, config: KeyConfig):
             loc = f"{past_frames+window_start} -> {past_frames+window_end}"
 
             if not has_start:
-                logger.debug("="*20)
-                logger.debug(
-                    f"%s Pixs:\n%s\n", loc, pixels_batch[window_start:window_end].tolist())
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("="*20)
+                    logger.debug(
+                        "%s Pixs:\n%s\n", loc, pixels_batch[window_start:window_end].tolist())
 
                 non_empty_window_cpu = torch.logical_not(
                     empty_batch_cpu[window_start:window_end])
@@ -226,10 +228,11 @@ def key_frame_generator(path, config: KeyConfig):
                 stop_window_cpu = torch.logical_or(
                     changed_window_cpu, empty_window_cpu)
 
-                logger.debug("="*20)
-                logger.debug(
-                    f"{loc} Pixs:\n{pixels_batch[window_start:window_end].tolist()}\n")
-                logger.debug(f"{loc} Diff:\n{diff_window.tolist()}\n")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("="*20)
+                    logger.debug("%s Pixs:%s\n", loc,
+                                 pixels_batch[window_start:window_end].tolist())
+                    logger.debug("%s Diff:%s\n", loc, diff_window.tolist())
 
                 i = stop_window_cpu.nonzero_static(
                     size=1, fill_value=-1).item()

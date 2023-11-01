@@ -30,7 +30,7 @@ KeyExtractorConfig1080p1x = KeyConfig(
 KeyExtractorConfig = KeyExtractorConfig1080p1x
 EasyOCRArgs = dict(
     blocklist="~@#$%^&*_-+={}[]|\\:;<>/",
-    batch_size=4
+    batch_size=16
 )
 
 
@@ -70,7 +70,9 @@ def download_anime_by_name(name: str):
 
 def convert_subtitle():
     keys = list(key_frame_generator(IN_VIDEO_PATH, KeyExtractorConfig))
+    #torch.cuda.empty_cache()
     ocrs = list(ocr_text_generator(keys, EasyOCRArgs))
+    torch.cuda.empty_cache()
     srts = list(srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
@@ -100,7 +102,7 @@ def print_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-name = "星靈"
+name = "Derby"
 download_anime_by_name(name)
 convert_subtitle()
 print_and_serve()
