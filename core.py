@@ -29,7 +29,7 @@ class ContourConfig:
 @dataclass
 class KeyConfig:
     empty: int
-    diff: int
+    diff_tol: float
     batch_edge: int
     batch_window: int
     margin: int
@@ -159,12 +159,14 @@ def key_frame_generator(path, config: KeyConfig):
     start_time = 0
     start_frame = torch.empty(0)
     start_edge = torch.empty(0)
+    start_diff = 0
 
     def select_key_frame(cur_time, cur_frame, cur_edge):
-        nonlocal has_start, start_time, start_frame, start_edge
+        nonlocal has_start, start_time, start_frame, start_edge, start_diff
         assert (not has_start)
         has_start = True
         start_time = cur_time
+        start_diff = (start_edge.sum()*config.diff_tol).int()
         # Move to CPU. start_frame will not be used for computation.
         start_frame = yuv_to_rgb(subtitle_bound(
             subtitle_region(cur_frame),
@@ -220,7 +222,7 @@ def key_frame_generator(path, config: KeyConfig):
                 else:
                     window_start = window_start + i
                     logger.info("%s Empty -> New Text at Frame %s",
-                                loc, window_start)
+                                loc, past_frames+window_start)
                     select_key_frame(
                         past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
             else:
@@ -228,7 +230,7 @@ def key_frame_generator(path, config: KeyConfig):
                 edge_window = edge_batch[window_start:window_end]
                 diff_window = torch.logical_xor(
                     edge_window, start_edge).int().sum(dim=[1, 2])
-                changed_window_cpu = diff_window.gt(config.diff).cpu()
+                changed_window_cpu = diff_window.gt(start_diff).cpu()
                 empty_window_cpu = empty_batch_cpu[window_start:window_end]
                 stop_window_cpu = torch.logical_or(
                     changed_window_cpu, empty_window_cpu)
@@ -250,10 +252,10 @@ def key_frame_generator(path, config: KeyConfig):
 
                     if empty_window_cpu[i].item():
                         logger.info("%s Text -> Empty  at Frame %s",
-                                    loc, window_start)
+                                    loc, past_frames+window_start)
                     else:
                         logger.info("%s Text -> New Text at Frame %s",
-                                    loc, window_start)
+                                    loc, past_frames+window_start)
                         select_key_frame(
                             past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
 
@@ -285,7 +287,7 @@ def text_for_subtitle(ocr_result):
         r[1]
         for r in ocr_result
         if not r[1].isdigit() and r[0][2][1] - r[0][0][1] > 30
-        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= len(r[1])//4
+        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= max(1,len(r[1])//4)
     ]), locale="zh-cn")
 
 
@@ -339,7 +341,16 @@ def debug_contour(path, config: KeyConfig):
         #if i!=227: continue
         yuv_batch = subtitle_region(yuv_batch)
         rgb_batch = yuv_to_rgb(yuv_batch)
+        edge_batch = subtitle_black_contour(yuv_batch, config.contour)
+
         torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
-        edge = subtitle_black_contour(yuv_batch, config.contour)
-        torchvision.io.write_png(bool_to_grey(
-            edge).cpu(), f"debug/img/{i}_.png")
+
+        if edge_batch.sum().item() > config.empty:
+            rgb_cut = subtitle_bound(
+                rgb_batch[0],
+                edge_batch[0],
+                config
+            )
+            torchvision.io.write_png(rgb_cut.cpu(), f"debug/img/{i}_.png")
+            torchvision.io.write_png(bool_to_grey(
+                edge_batch).cpu(), f"debug/img/{i}__.png")

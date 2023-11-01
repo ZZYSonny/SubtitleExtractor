@@ -45,3 +45,21 @@ EasyOCRArgs = dict(
     batch_size=16
 )
 ```
+
+### 字幕出现问题，怎么调试
+如果字幕在该更新的时候没有更新，那么很有可能是关键帧识别的bug。
+- 首先用ffmpeg把出问题的一段切出来。
+```bash
+ffmpeg -i in0.mp4 -ss 00:22:20 -t 00:02:00 -c:v copy -c:a copy in.mp4
+```
+- 开启调试日志，再次运行`main.py`
+```bash
+export LOGLEVEL=DEBUG
+python3 main.py
+```
+- 为了方便找到帧以及对应的Contour,可以用这个函数。
+```py
+debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
+```
+
+如果字幕识别出错，那么就去调EasyOCR的参数吧。

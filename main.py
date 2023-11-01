@@ -14,11 +14,11 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=200, 
-    diff=2000, 
+    empty=300, 
+    diff_tol=0.4,
     batch_edge=512, 
     batch_window=16, 
-    margin=10, 
+    margin=20, 
     contour=ContourConfig(
         y_tol=32, 
         uv_tol=2, 
@@ -29,8 +29,11 @@ KeyExtractorConfig1080p1x = KeyConfig(
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
 EasyOCRArgs = dict(
-    blocklist="`~@#$%^&*_-+={}[]|\\:;<>/",
-    batch_size=16
+    blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
+    batch_size=16,
+    contrast_ths=0.5,
+    adjust_contrast=0.7,
+    text_threshold=0.1
 )
 
 
@@ -106,3 +109,5 @@ name = "Derby"
 download_anime_by_name(name)
 convert_subtitle()
 print_and_serve()
+
+#debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
