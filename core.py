@@ -129,19 +129,17 @@ def subtitle_bound(frame, edge, config: KeyConfig):
     return frame[:, r1:r2, c1:c2]
 
 
-def get_fps(path):
-    video = cv2.VideoCapture(path)
-    return video.get(cv2.CAP_PROP_FPS)
-
-def get_batch_num(path, config):
-    video = cv2.VideoCapture(path)
-    length = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-    return int((length + config.batch_edge - 1) // config.batch_edge)
-
 def key_frame_generator(path, config: KeyConfig):
-    fps = get_fps(path)
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
+    
+    info = stream.get_src_stream_info(0)
+    num_frame = stream.get_src_stream_info(0).num_frames
+    num_batch = int((num_frame + config.batch_edge - 1) // config.batch_edge)
+    assert(info.codec == "h264")
+    assert(info.format == "yuv420p")
+
+    fps = info.frame_rate
     stream.add_video_stream(config.batch_edge,
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
@@ -149,10 +147,10 @@ def key_frame_generator(path, config: KeyConfig):
                                 "crop": "880x0x0x0"
                             },
                             filter_desc=f"fps={fps}"
-                            )
+                            )    
 
     has_start = 0
-    start_time = 0.0
+    start_time = 0
     start_frame = torch.empty(0)
     start_edge = torch.empty(0)
 
@@ -184,7 +182,7 @@ def key_frame_generator(path, config: KeyConfig):
     past_frames = 0
 
     logger.info("Decoding video")
-    for (yuv_batch, ) in tqdm(stream.stream(), total=get_batch_num(path, config), desc="Key"):
+    for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key"):
         logger.info("Computing edges")
         edge_batch = subtitle_black_contour(
             subtitle_region(yuv_batch), config.contour)
@@ -254,6 +252,7 @@ def key_frame_generator(path, config: KeyConfig):
         past_frames += yuv_batch.shape[0]
         logger.info("Decoding video")
 
+    stream.remove_stream(0)
     if has_start:
         yield release_key_frame(past_frames-1)
 
