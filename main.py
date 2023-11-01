@@ -29,7 +29,7 @@ KeyExtractorConfig1080p1x = KeyConfig(
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
 EasyOCRArgs = dict(
-    blocklist="~@#$%^&*_-+={}[]|\\:;<>/",
+    blocklist="`~@#$%^&*_-+={}[]|\\:;<>/",
     batch_size=16
 )
 
