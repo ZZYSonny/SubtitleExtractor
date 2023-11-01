@@ -32,11 +32,11 @@ EasyOCRArgs = dict(
     # https://www.jaided.ai/easyocr/documentation/
     blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
     batch_size=16,
-    contrast_ths=0.5,
-    adjust_contrast=0.7,
+    #contrast_ths=0.5,
+    #adjust_contrast=0.7,
     # https://github.com/clovaai/CRAFT-pytorch/issues/51
-    text_threshold=0.1,
-    low_text=0.2
+    #text_threshold=0.3,
+    #low_text=0.2
 )
 
 
@@ -109,7 +109,7 @@ def print_and_serve():
             httpd.serve_forever()
 
 name = "Derby"
-download_anime_by_name(name)
+#download_anime_by_name(name)
 convert_subtitle()
 print_and_serve()
 
