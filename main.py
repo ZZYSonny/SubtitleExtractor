@@ -15,7 +15,7 @@ SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
     empty=300, 
-    diff_tol=0.4,
+    diff_tol=0.6,
     batch_edge=512, 
     batch_window=16, 
     margin=20, 
@@ -29,11 +29,14 @@ KeyExtractorConfig1080p1x = KeyConfig(
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
 EasyOCRArgs = dict(
+    # https://www.jaided.ai/easyocr/documentation/
     blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
     batch_size=16,
     contrast_ths=0.5,
     adjust_contrast=0.7,
-    text_threshold=0.1
+    # https://github.com/clovaai/CRAFT-pytorch/issues/51
+    text_threshold=0.1,
+    low_text=0.2
 )
 
 

@@ -159,14 +159,14 @@ def key_frame_generator(path, config: KeyConfig):
     start_time = 0
     start_frame = torch.empty(0)
     start_edge = torch.empty(0)
-    start_diff = 0
+    start_pix = torch.empty(1)
 
     def select_key_frame(cur_time, cur_frame, cur_edge):
-        nonlocal has_start, start_time, start_frame, start_edge, start_diff
+        nonlocal has_start, start_time, start_frame, start_edge, start_pix
         assert (not has_start)
         has_start = True
         start_time = cur_time
-        start_diff = (start_edge.sum()*config.diff_tol).int()
+        start_pix = start_edge.sum()
         # Move to CPU. start_frame will not be used for computation.
         start_frame = yuv_to_rgb(subtitle_bound(
             subtitle_region(cur_frame),
@@ -230,7 +230,11 @@ def key_frame_generator(path, config: KeyConfig):
                 edge_window = edge_batch[window_start:window_end]
                 diff_window = torch.logical_xor(
                     edge_window, start_edge).int().sum(dim=[1, 2])
-                changed_window_cpu = diff_window.gt(start_diff).cpu()
+                diff_thres = torch.min(
+                    start_pix,
+                    pixels_batch[window_start:window_end]
+                ).mul(config.diff_tol).int()
+                changed_window_cpu = diff_window.gt(diff_thres).cpu()
                 empty_window_cpu = empty_batch_cpu[window_start:window_end]
                 stop_window_cpu = torch.logical_or(
                     changed_window_cpu, empty_window_cpu)
