@@ -19,8 +19,8 @@ logging.basicConfig(level=LOGLEVEL)
 
 @dataclass
 class ContourConfig:
-    white: int
-    black: int
+    y_tol: int
+    uv_tol: int
     near: int
     kernel: int
     scale: int
@@ -59,22 +59,27 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
-
 @torch.compile(mode="max-autotune")
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     y = yuv[:, 0]
     u = yuv[:, 1]
     v = yuv[:, 2]
     grey_mask = torch.logical_and(
-        u == 128,
-        v == 128
+        torch.logical_and(
+            u >= 128 - config.uv_tol,
+            u <= 128 + config.uv_tol
+        ),
+        torch.logical_and(
+            v >= 128 - config.uv_tol,
+            v <= 128 + config.uv_tol
+        )
     )
     white_mask = torch.logical_and(
-        y > 255-config.white,
+        y > 255-config.y_tol,
         grey_mask
     )
     black_mask = torch.logical_and(
-        y < config.black,
+        y < config.y_tol,
         grey_mask
     )
     dtype = torch.float16 if yuv.device.type == "cuda" else torch.float32
@@ -140,7 +145,7 @@ def key_frame_generator(path, config: KeyConfig):
     assert (info.codec == "h264")
     assert (info.format == "yuv420p")
 
-    fps = info.frame_rate
+    fps = round(info.frame_rate, 2)
     stream.add_video_stream(config.batch_edge,
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
@@ -214,7 +219,7 @@ def key_frame_generator(path, config: KeyConfig):
                     logger.info("%s Empty:", loc)
                 else:
                     window_start = window_start + i
-                    logger.info("%s Empty -> Text at Frame %s",
+                    logger.info("%s Empty -> New Text at Frame %s",
                                 loc, window_start)
                     select_key_frame(
                         past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
@@ -247,7 +252,7 @@ def key_frame_generator(path, config: KeyConfig):
                         logger.info("%s Text -> Empty  at Frame %s",
                                     loc, window_start)
                     else:
-                        logger.info("%s Text -> Changed at Frame %s",
+                        logger.info("%s Text -> New Text at Frame %s",
                                     loc, window_start)
                         select_key_frame(
                             past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
@@ -294,7 +299,7 @@ def srt_entry_generator(ocrs):
         cur_end = ocr["end"]
         cur_text = text_for_subtitle(ocr["ocrs"])
         if last_text == cur_text and cur_start - last_end < 0.1:
-            last_end = cur_end
+            last_end = cur_end 
         else:
             if len(last_text) > 0:
                 time1 = datetime.utcfromtimestamp(
@@ -331,19 +336,10 @@ def debug_contour(path, config: KeyConfig):
                             )
 
     for i, (yuv_batch,) in enumerate(stream.stream()):
+        #if i!=227: continue
+        yuv_batch = subtitle_region(yuv_batch)
         rgb_batch = yuv_to_rgb(yuv_batch)
         torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
         edge = subtitle_black_contour(yuv_batch, config.contour)
         torchvision.io.write_png(bool_to_grey(
             edge).cpu(), f"debug/img/{i}_.png")
-
-
-def debug_key(key_frame_generator, config: KeyConfig):
-    os.system("rm debug/key/*.png")
-    for i, key in enumerate(key_frame_generator):
-        frame = key["frame"]
-        edge = subtitle_black_contour_single(
-            frame, config.contour).to(torch.uint8)
-        torchvision.io.write_png(frame, f"debug/key/{i}.png")
-        torchvision.io.write_png(
-            (edge*255).unsqueeze(0).to(torch.uint8), f"debug/key/{i}_.png")

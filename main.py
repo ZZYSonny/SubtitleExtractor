@@ -15,13 +15,13 @@ SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
     empty=200, 
-    diff=1000, 
+    diff=2000, 
     batch_edge=512, 
     batch_window=16, 
     margin=10, 
     contour=ContourConfig(
-        white=32, 
-        black=32, 
+        y_tol=32, 
+        uv_tol=2, 
         near=2, 
         kernel=5, 
         scale=1
