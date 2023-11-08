@@ -108,8 +108,8 @@ def print_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-name = "Derby"
-#download_anime_by_name(name)
+name = "16bit"
+download_anime_by_name(name)
 convert_subtitle()
 print_and_serve()
 

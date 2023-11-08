@@ -145,14 +145,14 @@ def key_frame_generator(path, config: KeyConfig):
     assert (info.codec == "h264")
     assert (info.format == "yuv420p")
 
-    fps = round(info.frame_rate, 2)
+    fps = info.frame_rate
     stream.add_video_stream(config.batch_edge,
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
                             decoder_option={
                                 "crop": "880x0x0x0"
                             },
-                            filter_desc=f"fps={fps}"
+                            #filter_desc=f"fps={fps}"
                             )
 
     has_start = 0
