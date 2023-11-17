@@ -14,7 +14,7 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=0.03, 
+    empty=0.01, 
     diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
@@ -83,22 +83,22 @@ def convert_subtitle():
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
 
-    #os.system(" ".join([
-    #    f"ffmpeg -y",
-    #    f"-i {IN_VIDEO_PATH}",
-    #    f"-sub_charenc 'UTF-8'",
-    #    f"-f srt -i {OUT_SUBTITLE_PATH}",
-    #    f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
-    #    f"-c:s srt -metadata:s:s:0 language=zh-CN",
-    #    f"{OUT_VIDEO_PATH}"
-    #]))
 
 class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.path = OUT_VIDEO_PATH
         return http.server.SimpleHTTPRequestHandler.do_GET(self)
     
-def print_and_serve():
+def merge_and_serve():
+    os.system(" ".join([
+        f"ffmpeg -y",
+        f"-i {IN_VIDEO_PATH}",
+        f"-sub_charenc 'UTF-8'",
+        f"-f srt -i {OUT_SUBTITLE_PATH}",
+        f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
+        f"-c:s srt -metadata:s:s:0 language=zh-CN",
+        f"{OUT_VIDEO_PATH}"
+    ]))
     print(f"转换完成,视频保存在 {os.path.abspath(OUT_VIDEO_PATH)}")
 
     if SERVE_HTTP:
@@ -111,6 +111,6 @@ def print_and_serve():
 #name = "娘"
 #download_anime_by_name(name)
 convert_subtitle()
-#print_and_serve()
+#merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
