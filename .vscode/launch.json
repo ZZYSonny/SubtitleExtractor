@@ -10,7 +10,10 @@
             "request": "launch",
             "program": "main.py",
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "env": {
+                "LOGLEVEL": "DEBUG"
+            }
         }
     ]
 }

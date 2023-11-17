@@ -22,7 +22,6 @@ class ContourConfig:
     y_tol: int
     uv_tol: int
     near: int
-    kernel: int
     scale: int
 
 
@@ -59,7 +58,7 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
-@torch.compile(mode="max-autotune")
+#@torch.compile(mode="max-autotune")
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     y = yuv[:, 0]
     u = yuv[:, 1]
@@ -82,31 +81,27 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
         y < config.y_tol,
         grey_mask
     )
-    dtype = torch.float16 if yuv.device.type == "cuda" else torch.float32
-    if config.scale == 1:
-        white_cnt_scaled = white_mask.to(dtype)
-        black_mask_scaled = black_mask
-    else:
-        white_cnt_scaled = F.avg_pool2d(
-            white_mask.to(dtype),
-            kernel_size=config.scale,
-            divisor_override=1
-        )
-        black_mask_scaled = F.avg_pool2d(
-            black_mask.to(dtype),
-            kernel_size=config.scale,
-            divisor_override=1
-        ) > 0.5
-    white_conv = F.avg_pool2d(
-        white_cnt_scaled,
-        kernel_size=config.kernel,
-        padding=config.kernel//2,
-        stride=1,
-        divisor_override=1
+    white_mask_scaled = torch.sum(
+        white_mask.reshape([
+            y.size(0), 
+            y.size(1)//config.scale, config.scale, 
+            y.size(2)//config.scale, config.scale, 
+        ]),
+        dim=[2,4],
+        dtype=torch.uint8
+    )
+    black_mask_scaled = torch.sum(
+        white_mask.reshape([
+            y.size(0), 
+            y.size(1)//config.scale, config.scale, 
+            y.size(2)//config.scale, config.scale, 
+        ]),
+        dim=[2,4],
+        dtype=torch.uint8
     )
     final = torch.logical_and(
-        white_conv.gt(config.near - 0.5),
-        black_mask_scaled
+        white_mask_scaled > config.near - 0.5,
+        black_mask_scaled > 0.5
     )
     return final
 
@@ -166,7 +161,7 @@ def key_frame_generator(path, config: KeyConfig):
         assert (not has_start)
         has_start = True
         start_time = cur_time
-        start_pix = start_edge.sum()
+        start_pix = cur_edge.sum()
         # Move to CPU. start_frame will not be used for computation.
         start_frame = yuv_to_rgb(subtitle_bound(
             subtitle_region(cur_frame),

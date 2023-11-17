@@ -15,7 +15,7 @@ SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
     empty=300, 
-    diff_tol=0.6,
+    diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
     margin=20, 
@@ -23,8 +23,7 @@ KeyExtractorConfig1080p1x = KeyConfig(
         y_tol=32, 
         uv_tol=2, 
         near=2, 
-        kernel=5, 
-        scale=1
+        scale=2
     )
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
@@ -83,15 +82,15 @@ def convert_subtitle():
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
 
-    os.system(" ".join([
-        f"ffmpeg -y",
-        f"-i {IN_VIDEO_PATH}",
-        f"-sub_charenc 'UTF-8'",
-        f"-f srt -i {OUT_SUBTITLE_PATH}",
-        f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
-        f"-c:s srt -metadata:s:s:0 language=zh-CN",
-        f"{OUT_VIDEO_PATH}"
-    ]))
+    #os.system(" ".join([
+    #    f"ffmpeg -y",
+    #    f"-i {IN_VIDEO_PATH}",
+    #    f"-sub_charenc 'UTF-8'",
+    #    f"-f srt -i {OUT_SUBTITLE_PATH}",
+    #    f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
+    #    f"-c:s srt -metadata:s:s:0 language=zh-CN",
+    #    f"{OUT_VIDEO_PATH}"
+    #]))
 
 class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -108,9 +107,9 @@ def print_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-name = "16bit"
-download_anime_by_name(name)
+#name = "娘"
+#download_anime_by_name(name)
 convert_subtitle()
-print_and_serve()
+#print_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
