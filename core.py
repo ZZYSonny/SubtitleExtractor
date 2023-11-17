@@ -22,12 +22,13 @@ class ContourConfig:
     y_tol: int
     uv_tol: int
     near: int
-    scale: int
+    scale_white: int
+    scale_black: int
 
 
 @dataclass
 class KeyConfig:
-    empty: int
+    empty: float
     diff_tol: float
     batch_edge: int
     batch_window: int
@@ -84,24 +85,30 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     white_mask_scaled = torch.sum(
         white_mask.reshape([
             y.size(0), 
-            y.size(1)//config.scale, config.scale, 
-            y.size(2)//config.scale, config.scale, 
+            y.size(1)//config.scale_white, config.scale_white, 
+            y.size(2)//config.scale_white, config.scale_white, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    )
+    ).gt(config.near - 0.5)
     black_mask_scaled = torch.sum(
-        white_mask.reshape([
+        black_mask.reshape([
             y.size(0), 
-            y.size(1)//config.scale, config.scale, 
-            y.size(2)//config.scale, config.scale, 
+            y.size(1)//config.scale_black, config.scale_black, 
+            y.size(2)//config.scale_black, config.scale_black, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
+    ).gt(0.5).repeat_interleave(
+        config.scale_black//config.scale_white, 
+        dim=1
+    ).repeat_interleave(
+        config.scale_black//config.scale_white, 
+        dim=2
     )
     final = torch.logical_and(
-        white_mask_scaled > config.near - 0.5,
-        black_mask_scaled > 0.5
+        white_mask_scaled,
+        black_mask_scaled
     )
     return final
 
@@ -118,11 +125,11 @@ def subtitle_bound(frame, edge, config: KeyConfig):
     def bound_1d(xs):
         idx = xs.nonzero()
         return max(
-            config.contour.scale * idx[0].item()-config.margin,
+            config.contour.scale_white * idx[0].item()-config.margin,
             0
         ), min(
-            config.contour.scale * idx[-1].item()+1+config.margin,
-            config.contour.scale * xs.shape[0] - 1
+            config.contour.scale_white * idx[-1].item()+1+config.margin,
+            config.contour.scale_white * xs.shape[0] - 1
         )
 
     r1, r2 = bound_1d(edge.int().sum(dim=1))
@@ -190,7 +197,7 @@ def key_frame_generator(path, config: KeyConfig):
         edge_batch = subtitle_black_contour(
             subtitle_region(yuv_batch), config.contour)
         pixels_batch = edge_batch.int().sum(dim=[1, 2])
-        empty_batch_cpu = pixels_batch.lt(config.empty).cpu()
+        empty_batch_cpu = pixels_batch.lt(edge_batch[0].numel() * config.empty).cpu()
 
         window_start: int = 0
         while window_start != yuv_batch.shape[0]:
@@ -344,7 +351,7 @@ def debug_contour(path, config: KeyConfig):
 
         torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
 
-        if edge_batch.sum().item() > config.empty:
+        if edge_batch.sum().item() > edge_batch[0].numel() * config.empty:
             rgb_cut = subtitle_bound(
                 rgb_batch[0],
                 edge_batch[0],

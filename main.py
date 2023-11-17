@@ -14,7 +14,7 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=300, 
+    empty=0.03, 
     diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
@@ -23,7 +23,8 @@ KeyExtractorConfig1080p1x = KeyConfig(
         y_tol=32, 
         uv_tol=2, 
         near=2, 
-        scale=2
+        scale_white=4,
+        scale_black=8
     )
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
