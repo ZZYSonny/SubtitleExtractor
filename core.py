@@ -90,7 +90,7 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    ).gt(config.near - 0.5)
+    ).greater_equal(config.near)
     black_mask_scaled = torch.sum(
         black_mask.reshape([
             y.size(0), 
@@ -99,7 +99,7 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    ).gt(0.5).repeat_interleave(
+    ).greater_equal(1).repeat_interleave(
         config.scale_black//config.scale_white, 
         dim=1
     ).repeat_interleave(

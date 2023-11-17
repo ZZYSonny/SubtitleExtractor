@@ -108,9 +108,9 @@ def merge_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
 
-#name = "娘"
-#download_anime_by_name(name)
+name = "娘"
+download_anime_by_name(name)
 convert_subtitle()
-#merge_and_serve()
+merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
