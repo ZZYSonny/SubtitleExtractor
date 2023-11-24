@@ -62,6 +62,9 @@ def bool_to_grey(frames: torch.Tensor):
 
 #@torch.compile(mode="max-autotune")
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
+    scale_min = min(config.white_scale, config.black_scale)
+    scale_max = max(config.white_scale, config.black_scale)
+
     y = yuv[:, 0]
     u = yuv[:, 1]
     v = yuv[:, 2]
@@ -134,21 +137,32 @@ def subtitle_region(rgb: torch.Tensor):
     return rgb[:, -192:, :]
 
 
-def subtitle_bound(frame, edge, config: KeyConfig):
+def post_process(frame, edge, config: KeyConfig):
+    # Fill non-text area with black color
     scale = min(config.contour.white_scale, config.contour.black_scale)
-    def bound_1d(xs):
-        idx = xs.nonzero()
-        return max(
-            scale * idx[0].item()-config.margin,
-            0
-        ), min(
-            scale * idx[-1].item()+1+config.margin,
-            scale * xs.shape[0] - 1
-        )
+    not_edge_patched = torch.logical_not(edge).repeat_interleave(
+        scale, dim=0
+    ).repeat_interleave(
+        scale, dim=1
+    )
+    frame[:, not_edge_patched] = 0
 
-    r1, r2 = bound_1d(edge.int().sum(dim=1))
-    c1, c2 = bound_1d(edge.int().sum(dim=0))
-    return frame[:, r1:r2, c1:c2]
+    # Crop the bounding box
+    def bound_1d(xs):
+        idx = xs.cpu().nonzero()
+        r = max(
+            idx[0].item()-config.margin,
+            0
+        )
+        c = min(
+            idx[-1].item()+1+config.margin,
+            xs.shape[0] - 1
+        )
+        return r,c
+    r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32))
+    c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32))
+    frame_box = frame[..., scale*r1:scale*r2, scale*c1:scale*c2]
+    return frame_box.to("cpu")
 
 
 def key_frame_generator(path, config: KeyConfig):
@@ -184,11 +198,11 @@ def key_frame_generator(path, config: KeyConfig):
         start_time = cur_time
         start_pix = cur_edge.sum()
         # Move to CPU. start_frame will not be used for computation.
-        start_frame = yuv_to_rgb(subtitle_bound(
+        start_frame = yuv_to_rgb(post_process(
             subtitle_region(cur_frame),
             cur_edge,
             config
-        )).cpu()
+        ))
         # Clone edge so that in the next batch, previous edge_batch
         # can be deleted.
         start_edge = cur_edge.clone()
@@ -366,11 +380,11 @@ def debug_contour(path, config: KeyConfig):
         torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
 
         if edge_batch.sum().item() > edge_batch[0].numel() * config.empty:
-            rgb_cut = subtitle_bound(
+            rgb_cut = post_process(
                 rgb_batch[0],
                 edge_batch[0],
                 config
             )
-            torchvision.io.write_png(rgb_cut.cpu(), f"debug/img/{i}_.png")
             torchvision.io.write_png(bool_to_grey(
-                edge_batch).cpu(), f"debug/img/{i}__.png")
+                edge_batch).cpu(), f"debug/img/{i}_.png")
+            torchvision.io.write_png(rgb_cut, f"debug/img/{i}__.png")

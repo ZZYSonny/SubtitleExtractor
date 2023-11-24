@@ -18,7 +18,7 @@ KeyExtractorConfig1080p1x = KeyConfig(
     diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
-    margin=20, 
+    margin=2, 
     contour=ContourConfig(
         y_tol=32, 
         uv_tol=2, 
@@ -113,7 +113,7 @@ def merge_and_serve():
 #娘
 #芙
 #家
-name = "16bit"
+name = "芙"
 download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
