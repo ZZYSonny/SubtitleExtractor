@@ -131,7 +131,7 @@ def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
 
 
 def subtitle_region(rgb: torch.Tensor):
-    return rgb[:, -200:, :]
+    return rgb[:, -192:, :]
 
 
 def subtitle_bound(frame, edge, config: KeyConfig):
