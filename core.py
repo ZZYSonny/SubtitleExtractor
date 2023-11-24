@@ -21,9 +21,10 @@ logging.basicConfig(level=LOGLEVEL)
 class ContourConfig:
     y_tol: int
     uv_tol: int
-    near: int
-    scale_white: int
-    scale_black: int
+    black_scale: int
+    black_min: int
+    white_scale: int
+    white_min: int
 
 
 @dataclass
@@ -85,27 +86,39 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     white_mask_scaled = torch.sum(
         white_mask.reshape([
             y.size(0), 
-            y.size(1)//config.scale_white, config.scale_white, 
-            y.size(2)//config.scale_white, config.scale_white, 
+            y.size(1)//config.white_scale, config.white_scale, 
+            y.size(2)//config.white_scale, config.white_scale, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    ).greater_equal(config.near)
+    ).greater_equal(config.white_min)        
     black_mask_scaled = torch.sum(
         black_mask.reshape([
             y.size(0), 
-            y.size(1)//config.scale_black, config.scale_black, 
-            y.size(2)//config.scale_black, config.scale_black, 
+            y.size(1)//config.black_scale, config.black_scale, 
+            y.size(2)//config.black_scale, config.black_scale, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    ).greater_equal(1).repeat_interleave(
-        config.scale_black//config.scale_white, 
-        dim=1
-    ).repeat_interleave(
-        config.scale_black//config.scale_white, 
-        dim=2
-    )
+    ).greater_equal(config.black_min)
+    
+    if config.white_scale < config.black_scale:
+        black_mask_scaled = black_mask_scaled.repeat_interleave(
+            config.black_scale//config.white_scale, 
+            dim=1
+        ).repeat_interleave(
+            config.black_scale//config.white_scale, 
+            dim=2
+        )
+    elif config.white_scale > config.black_scale:
+        white_mask_scaled = white_mask_scaled.repeat_interleave(
+            config.white_scale//config.black_scale, 
+            dim=1
+        ).repeat_interleave(
+            config.white_scale//config.black_scale, 
+            dim=2
+        )
+
     final = torch.logical_and(
         white_mask_scaled,
         black_mask_scaled
@@ -122,14 +135,15 @@ def subtitle_region(rgb: torch.Tensor):
 
 
 def subtitle_bound(frame, edge, config: KeyConfig):
+    scale = min(config.contour.white_scale, config.contour.black_scale)
     def bound_1d(xs):
         idx = xs.nonzero()
         return max(
-            config.contour.scale_white * idx[0].item()-config.margin,
+            scale * idx[0].item()-config.margin,
             0
         ), min(
-            config.contour.scale_white * idx[-1].item()+1+config.margin,
-            config.contour.scale_white * xs.shape[0] - 1
+            scale * idx[-1].item()+1+config.margin,
+            scale * xs.shape[0] - 1
         )
 
     r1, r2 = bound_1d(edge.int().sum(dim=1))
@@ -152,7 +166,7 @@ def key_frame_generator(path, config: KeyConfig):
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
                             decoder_option={
-                                "crop": "880x0x0x0"
+                                "crop": "888x0x0x0"
                             },
                             #filter_desc=f"fps={fps}"
                             )
@@ -339,7 +353,7 @@ def debug_contour(path, config: KeyConfig):
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
                             decoder_option={
-                                "crop": "880x0x0x0"
+                                "crop": "888x0x0x0"
                             }
                             )
 

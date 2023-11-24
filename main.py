@@ -14,7 +14,7 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=0.01, 
+    empty=0.002, 
     diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
@@ -22,9 +22,10 @@ KeyExtractorConfig1080p1x = KeyConfig(
     contour=ContourConfig(
         y_tol=32, 
         uv_tol=2, 
-        near=2, 
-        scale_white=4,
-        scale_black=8
+        white_scale=4,
+        white_min=2,
+        black_scale=16,
+        black_min=1,
     )
 )
 KeyExtractorConfig = KeyExtractorConfig1080p1x
@@ -107,8 +108,12 @@ def merge_and_serve():
         with socketserver.TCPServer(("", 8000), handler) as httpd:
             print(f"转换完成,视频可通过 http://{ip}:8000 下载")
             httpd.serve_forever()
-
-name = "娘"
+#星
+#16bit
+#娘
+#芙
+#家
+name = "16bit"
 download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
