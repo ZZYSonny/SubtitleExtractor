@@ -58,7 +58,7 @@ def download_anime_by_name(name: str):
         urllib.request.urlretrieve(
             RSS_URL, filename=RSS_PATH, reporthook=t.update_to)
 
-    for item in ET.parse(RSS_PATH).getroot().findall('./channel/item'):
+    for item in reversed(ET.parse(RSS_PATH).getroot().findall('./channel/item')):
         title = item.find("title").text
         link = item.find("link").text
         size_elem = [child for child in item if child.tag.endswith("size")]
@@ -111,8 +111,8 @@ def merge_and_serve():
 #16bit
 #娘
 #芙
-#家
-name = "家"
+#家裡蹲
+name = "家裡蹲"
 download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
