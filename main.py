@@ -1,3 +1,5 @@
+import functools
+import os.path as osp
 import urllib.request
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
@@ -84,11 +86,6 @@ def convert_subtitle():
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
 
-
-class MyHttpRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        self.path = OUT_VIDEO_PATH
-        return http.server.SimpleHTTPRequestHandler.do_GET(self)
     
 def merge_and_serve():
     os.system(" ".join([
@@ -104,16 +101,18 @@ def merge_and_serve():
 
     if SERVE_HTTP:
         ip = socket.gethostbyname(socket.gethostname())
-        handler = MyHttpRequestHandler
+        folder_abs_path = osp.abspath(osp.join(OUT_VIDEO_PATH, ".."))
+        out_base_name = osp.basename(OUT_VIDEO_PATH)
+        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=folder_abs_path)
         with socketserver.TCPServer(("", 8000), handler) as httpd:
-            print(f"转换完成,视频可通过 http://{ip}:8000 下载")
+            print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
             httpd.serve_forever()
 #星
 #16bit
 #娘
 #芙
 #家
-name = "芙"
+name = "家"
 download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
