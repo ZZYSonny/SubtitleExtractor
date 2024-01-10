@@ -60,7 +60,7 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
-@torch.compile(mode="max-autotune")
+@torch.compile
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     y = yuv[:, 0]
     u = yuv[:, 1]
@@ -91,7 +91,7 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
         ]),
         dim=[2,4],
         dtype=torch.uint8
-    ).greater_equal(config.white_min)        
+    ).greater_equal(config.white_min)
     black_mask_scaled = torch.sum(
         black_mask.reshape([
             y.size(0), 

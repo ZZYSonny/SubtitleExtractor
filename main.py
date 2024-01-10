@@ -1,3 +1,9 @@
+#import os
+#os.environ["TORCHINDUCTOR_MAX_AUTOTUNE"]="1"
+#os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE"]="1"
+#os.environ["TORCHINDUCTOR_LAYOUT_OPTIMIZATION"]="1"
+#os.environ["TORCHINDUCTOR_DEBUG_FUSION"]="1"
+#os.environ["TORCHINDUCTOR_PERMUTE_FUSION"]="1"
 import functools
 import os.path as osp
 import urllib.request
@@ -16,7 +22,7 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=0.002, 
+    empty=0.001, 
     diff_tol=0.5,
     batch_edge=512, 
     batch_window=16, 
@@ -50,7 +56,8 @@ class DownloadProgressBar(tqdm):
 
 def download_anime_by_name(name: str):
     # 获取RSS
-    opener = urllib.request.build_opener()
+    proxy = urllib.request.ProxyHandler(urllib.request.getproxies())
+    opener = urllib.request.build_opener(proxy)
     opener.addheaders = [('User-agent', 'Mozilla/5.0')]
     urllib.request.install_opener(opener)
     with DownloadProgressBar(unit='B', unit_scale=True,
@@ -94,7 +101,7 @@ def merge_and_serve():
         f"-sub_charenc 'UTF-8'",
         f"-f srt -i {OUT_SUBTITLE_PATH}",
         f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
-        f"-c:s srt -metadata:s:s:0 language=zh-CN",
+        f"-c:s srt -metadata:s:s:0 language=chs",
         f"{OUT_VIDEO_PATH}"
     ]))
     print(f"转换完成,视频保存在 {os.path.abspath(OUT_VIDEO_PATH)}")
@@ -107,12 +114,10 @@ def merge_and_serve():
         with socketserver.TCPServer(("", 8000), handler) as httpd:
             print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
             httpd.serve_forever()
-#星
-#16bit
-#娘
+#憧憬
 #芙
-#家裡蹲
-name = "家裡蹲"
+#我內心
+name = "憧憬"
 download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()

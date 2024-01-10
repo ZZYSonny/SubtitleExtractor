@@ -63,3 +63,10 @@ debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
 ```
 
 如果字幕识别出错，那么就去调EasyOCR的参数吧。
+
+###
+```bash
+export ALL_PROXY=socks5://127.0.0.1:10808
+export HTTP_PROXY=http://127.0.0.1:10809
+export HTTPS_PROXY=http://127.0.0.1:10809
+```
