@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 @dataclass
 class ContourConfig:
-    y_tol: int
-    uv_tol: int
-    black_scale: int
-    black_min: int
-    white_scale: int
-    white_min: int
+    tol_y_bw: int
+    tol_uv_grey: int
+    patch_black: int
+    patch_white: int
+    pix_min_black: int
+    pix_min_white: int
 
 @triton.autotune(
     configs=[
@@ -27,15 +27,15 @@ class ContourConfig:
 @triton.jit()
 def subtitle_black_contour_kernel(
     yuv_ptr, out_ptr,
-    config_tol_y: tl.constexpr, config_tol_uv: tl.constexpr,
-    config_white_scale: tl.constexpr, config_white_min: tl.constexpr,
-    config_black_scale: tl.constexpr, config_black_min: tl.constexpr,
     yuv_stride_n: tl.constexpr, yuv_stride_c: tl.constexpr, yuv_stride_h: tl.constexpr, yuv_stride_w: tl.constexpr,
     out_stride_n: tl.constexpr, out_stride_h: tl.constexpr, out_stride_w: tl.constexpr,
+    tol_y_bw: tl.constexpr, tol_uv_grey: tl.constexpr,
+    patch_white: tl.constexpr, pix_min_white: tl.constexpr,
+    patch_black: tl.constexpr, pix_min_black: tl.constexpr,
     block_h: tl.constexpr, block_w: tl.constexpr
 ):
-    block_out_h: tl.constexpr = block_h // config_white_scale
-    block_out_w: tl.constexpr = block_w // config_white_scale
+    block_out_h: tl.constexpr = block_h // patch_white
+    block_out_w: tl.constexpr = block_w // patch_white
 
     y_block_ptr = tl.make_block_ptr(
         base=yuv_ptr + tl.program_id(0) * yuv_stride_n,
@@ -62,50 +62,50 @@ def subtitle_black_contour_kernel(
     v = tl.load(y_block_ptr)
     
     grey = (
-        (u >= tl.full([1], 128-config_tol_uv, dtype=tl.uint8)) &
-        (u <= tl.full([1], 128+config_tol_uv, dtype=tl.uint8)) &
-        (v >= tl.full([1], 128-config_tol_uv, dtype=tl.uint8)) &
-        (v <= tl.full([1], 128+config_tol_uv, dtype=tl.uint8))
+        (u >= tl.full([1], 128-tol_uv_grey, dtype=tl.uint8)) &
+        (u <= tl.full([1], 128+tol_uv_grey, dtype=tl.uint8)) &
+        (v >= tl.full([1], 128-tol_uv_grey, dtype=tl.uint8)) &
+        (v <= tl.full([1], 128+tol_uv_grey, dtype=tl.uint8))
     )
-    white = grey & (y > tl.full([1], 255-config_tol_y, dtype=tl.uint8))
-    black = grey & (y < tl.full([1], config_tol_y, dtype=tl.uint8))
+    white = grey & (y > tl.full([1], 255-tol_y_bw, dtype=tl.uint8))
+    black = grey & (y < tl.full([1], tol_y_bw, dtype=tl.uint8))
 
     white_patch = tl.reshape(white.to(tl.uint8), [
         1, 
-        block_h // config_white_scale, config_white_scale,
-        block_w // config_white_scale, config_white_scale,
+        block_h // patch_white, patch_white,
+        block_w // patch_white, patch_white,
     ])
     white_cnt = tl.sum(tl.sum(white_patch,axis=2),axis=3)
-    white_mask = white_cnt >= tl.full([1], config_white_min, dtype=tl.uint8)
+    white_mask = white_cnt >= tl.full([1], pix_min_white, dtype=tl.uint8)
 
     black_patch = tl.reshape(black.to(tl.uint8), [
         1, 
-        block_h // config_black_scale, config_black_scale,
-        block_w // config_black_scale, config_black_scale,
+        block_h // patch_black, patch_black,
+        block_w // patch_black, patch_black,
     ])
     black_cnt = tl.sum(tl.sum(black_patch,axis=2),axis=3)
-    black_mask = black_cnt >= tl.full([1], config_black_min, dtype=tl.uint8)
+    black_mask = black_cnt >= tl.full([1], pix_min_black, dtype=tl.uint8)
 
     black_mask_broadcasted = tl.expand_dims(black_mask, axis=[1,2])
     white_mask_broadcasted = tl.reshape(white_mask, [
         1,
-        block_h // config_black_scale, config_black_scale // config_white_scale,
-        block_w // config_black_scale, config_black_scale // config_white_scale,
+        block_h // patch_black, patch_black // patch_white,
+        block_w // patch_black, patch_black // patch_white,
     ])
     final_mask_broadcasted = black_mask_broadcasted & white_mask_broadcasted
     final_mask = tl.reshape(final_mask_broadcasted, [
         1,
-        block_h // config_white_scale,
-        block_w // config_white_scale,
+        block_h // patch_white,
+        block_w // patch_white,
     ])
     tl.store(out_block_ptr, final_mask.to(tl.uint8))
 
 
 def subtitle_black_contour_fusion(yuv: torch.Tensor, config: ContourConfig):
     assert yuv.is_contiguous()
-    assert config.black_scale >= config.white_scale
+    assert config.patch_black >= config.patch_white
     out = torch.empty(
-        (yuv.shape[0], yuv.shape[2] // config.white_scale, yuv.shape[3] //config.white_scale), 
+        (yuv.shape[0], yuv.shape[2] // config.patch_white, yuv.shape[3] //config.patch_white), 
         dtype=torch.uint8,
         device=yuv.device
     )
@@ -116,11 +116,9 @@ def subtitle_black_contour_fusion(yuv: torch.Tensor, config: ContourConfig):
     )
     subtitle_black_contour_kernel[grid](
         yuv, out,
-        config.y_tol, config.uv_tol,
-        config.white_scale, config.white_min,
-        config.black_scale, config.black_min,
         yuv.stride(0), yuv.stride(1), yuv.stride(2), yuv.stride(3),
         out.stride(0), out.stride(1), out.stride(2),
+        **config.__dict__
     )
     return out
 
@@ -129,12 +127,12 @@ yuv = torch.load("debug/221.pt").clone()
 #yuv[0,0,0:2,0:4]=255
 #yuv[0,0,1,1]=0
 config = ContourConfig(
-    y_tol=32, 
-    uv_tol=2, 
-    white_scale=4,
-    white_min=2,
-    black_scale=16,
-    black_min=1,
+    tol_y_bw=32, 
+    tol_uv_grey=2, 
+    patch_white=4,
+    pix_min_white=2,
+    patch_black=16,
+    pix_min_black=1,
 )
 out = subtitle_black_contour_fusion(yuv, config)
 
