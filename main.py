@@ -98,10 +98,10 @@ def merge_and_serve():
     os.system(" ".join([
         f"ffmpeg -y",
         f"-i {IN_VIDEO_PATH}",
-        f"-sub_charenc 'UTF-8'",
-        f"-f srt -i {OUT_SUBTITLE_PATH}",
-        f"-map 0:0 -map 0:1 -map 1:0 -c:v copy -c:a copy",
-        f"-c:s srt -metadata:s:s:0 language=chs",
+        f"-i {OUT_SUBTITLE_PATH}",
+        f"-c copy",
+        f"-metadata:s:s:0 language=zh-CN",
+        f"-disposition:s:0 default",
         f"{OUT_VIDEO_PATH}"
     ]))
     print(f"转换完成,视频保存在 {os.path.abspath(OUT_VIDEO_PATH)}")
@@ -114,12 +114,14 @@ def merge_and_serve():
         with socketserver.TCPServer(("", 8000), handler) as httpd:
             print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
             httpd.serve_forever()
+
+#公主殿下
 #憧憬
 #芙
 #我內心
-name = "憧憬"
-download_anime_by_name(name)
-convert_subtitle()
+#name = "憧憬"
+#download_anime_by_name(name)
+#convert_subtitle()
 merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
