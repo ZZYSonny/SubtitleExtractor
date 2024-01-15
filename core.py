@@ -166,19 +166,23 @@ def bounding_box(frame, edge, config: KeyConfig):
     return frame_box
 
 def async_iterable(xs, limit=2):
-    q = queue.Queue(limit)
+    def async_generator():
+        q = queue.Queue(limit)
 
-    def decode_worker():
-        for x in xs:
-            q.put(x)
-        q.put(None)
-        q.task_done()
+        def decode_worker():
+            for x in xs:
+                q.put(x)
+            q.put(None)
+            q.task_done()
+        threading.Thread(target=decode_worker, daemon=True).start()
+        while True:
+            x = q.get()
+            if x is None: break
+            else: yield x
 
-    threading.Thread(target=decode_worker, daemon=True).start()
-    while True:
-        x = q.get()
-        if x is None: break
-        else: yield x
+    if isinstance(xs, list): return xs
+    else: return async_generator()
+
         
 
 def key_frame_generator(path, config: KeyConfig):
@@ -325,18 +329,55 @@ def text_for_subtitle(ocr_result):
         if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= max(1,len(r[1])//4)
     ]), locale="zh-cn")
 
+def easyocr_readtext(img, easyocr_args: dict):
+    threshold = 16
+    ans = ""
+
+    def x_split(img):
+        flag = img.sum(axis=1) > threshold
+
+        start = None
+        for i in range(flag.shape[0]):
+            if flag[i]:
+                if start is None:
+                    start = i
+            else:
+                if start is not None:
+                    if i - start > threshold: yield [start, i]
+                    start = None
+
+        if(start!=None):
+            yield[start, flag.shape[0]]
+
+    def y_fit(img, x_start, x_end):
+        flag = (img[x_start:x_end].sum(axis=0) > threshold).nonzero()[0]
+        return [flag[0], flag[-1]]
+
+    def padding(x0,x1,y1,y2,pad):
+        return [max(0, x0-pad), min(x1+pad, img.shape[0]), max(0, y1-pad), min(y2+pad, img.shape[1])]
+
+    for x_start, x_end in x_split(img):
+        y_start, y_end = y_fit(img, x_start, x_end)
+        x_start, x_end, y_start, y_end = padding(x_start, x_end, y_start, y_end, 32)
+        rec = reader.recognize(img[x_start:x_end, y_start:y_end], detail=0, paragraph=True, contrast_ths=0.6, **easyocr_args)
+        ans += " ".join(rec) + "\n"
+
+    return ans
+
 def ocr_text_generator(key_frame_generator, easyocr_args: dict):
     logger = logging.getLogger('OCR')
     logger.info("Loading EasyOCR Model")
     for key in tqdm(async_iterable(key_frame_generator, 0), desc="OCR", position=1):
         if 'ocrs' in key: yield key
         else:
-            res = reader.recognize(key['frame'], **easyocr_args)
-            logger.info("%s", res)
+            res_cht = easyocr_readtext(key["frame"], easyocr_args)
+            res_chs = zhconv.convert(res_cht, locale="zh-cn")
+            #res = reader.readtext(key['frame'], **easyocr_args)
+            #logger.info("%s", res)
             yield {
                 "start": key["start"],
                 "end": key["end"],
-                "ocrs": res
+                "ocrs": res_chs
             }
 
 def srt_entry_generator(ocrs):
@@ -347,7 +388,7 @@ def srt_entry_generator(ocrs):
     for i, ocr in enumerate(ocrs):
         cur_start = ocr["start"]
         cur_end = ocr["end"]
-        cur_text = text_for_subtitle(ocr["ocrs"])
+        cur_text = ocr["ocrs"]
         if last_text == cur_text and cur_start - last_end < 0.1:
             last_end = cur_end 
         else:

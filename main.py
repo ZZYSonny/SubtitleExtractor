@@ -28,7 +28,7 @@ KeyExtractorConfig1080p1x = KeyConfig(
     diff_tol=0.5,
     batch_edge=128, 
     batch_window=16, 
-    margin=0, 
+    margin=3, 
     contour=ContourConfig(
         y_tol=32, 
         uv_tol=2, 
@@ -120,8 +120,8 @@ def merge_and_serve():
 #憧憬
 #芙
 #我內心
-name = "憧憬"
-download_anime_by_name(name)
+#name = "公主"
+#download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
 
