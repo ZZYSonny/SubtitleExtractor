@@ -128,28 +128,28 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     )
     return final
 
-
-def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
-    return subtitle_black_contour(rgb.unsqueeze(0), config).squeeze(0)
-
-
-def subtitle_region(rgb: torch.Tensor):
-    return rgb[:, -192:, :]
-
-
-def post_process(frame, edge, config: KeyConfig):
-    # Fill non-text area with black color
-    scale = min(config.contour.white_scale, config.contour.black_scale)
+@torch.compile
+def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: KeyConfig):
+    scale = min(config.contour.black_scale, config.contour.white_scale)
     not_edge_patched = torch.logical_not(edge).repeat_interleave(
         scale, dim=0
     ).repeat_interleave(
         scale, dim=1
     )
-    frame[:, not_edge_patched] = 0
+    frame[not_edge_patched] = 0
+    return frame
 
+def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
+    return subtitle_black_contour(rgb.unsqueeze(0), config).squeeze(0)
+
+def subtitle_region(rgb: torch.Tensor):
+    return rgb[:, -192:, :]
+
+def bounding_box(frame, edge, config: KeyConfig):
+    scale = min(config.contour.black_scale, config.contour.white_scale)
     # Crop the bounding box
     def bound_1d(xs):
-        idx = xs.cpu().nonzero()
+        idx = xs.nonzero()
         r = max(
             idx[0].item()-config.margin,
             0
@@ -162,7 +162,7 @@ def post_process(frame, edge, config: KeyConfig):
     r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32))
     c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32))
     frame_box = frame[..., scale*r1:scale*r2, scale*c1:scale*c2]
-    return frame_box.to("cpu")
+    return frame_box
 
 def async_iterable(xs, length):
     q = queue.Queue(2)
@@ -203,37 +203,32 @@ def key_ocr_generator(path, config: KeyConfig, ocr_args: dict):
     start_frame = torch.empty(0)
     start_edge = torch.empty(0)
     start_pix = torch.empty(1)
+    start_ocr = []
 
     def select_key_frame(cur_time, cur_frame, cur_edge):
-        nonlocal has_start, start_time, start_frame, start_edge, start_pix
+        nonlocal has_start, start_time, start_frame, start_edge, start_pix, start_ocr
         assert (not has_start)
         has_start = True
         start_time = cur_time
         start_pix = cur_edge.sum()
         # Move to CPU. start_frame will not be used for computation.
-        start_frame = yuv_to_rgb(post_process(
-            subtitle_region(cur_frame),
-            cur_edge,
-            config
-        ))
+        start_subtitle_area = subtitle_region(cur_frame)
+        start_grey = mask_non_text_area(start_subtitle_area[0], cur_edge, config)
+        start_grey_bounded = bounding_box(start_grey, cur_edge, config)
+        start_ocr = reader.recognize(start_grey_bounded.cpu().numpy())
+
         # Clone edge so that in the next batch, previous edge_batch
         # can be deleted.
-        start_edge = cur_edge.clone()
+        start_edge = cur_edge
 
     def release_key_frame(cur_time):
         nonlocal has_start
         assert (has_start)
         has_start = False
-        frame = start_frame.permute([1, 2, 0])
         return {
             "start": start_time/fps,
             "end": cur_time/fps,
-            "ocrs": reader.recognize(
-                frame.numpy(),
-                [[0,frame.size(1),0,frame.size(0)]],
-                [],
-                #reformat=False
-            )
+            "ocrs": start_ocr
         }
 
     past_frames = 0
