@@ -18,6 +18,7 @@ import threading
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
+reader = easyocr.Reader(['ch_tra', 'en'])
 
 
 @dataclass
@@ -164,23 +165,25 @@ def bounding_box(frame, edge, config: KeyConfig):
     frame_box = frame[..., scale*r1:scale*r2, scale*c1:scale*c2]
     return frame_box
 
-def async_iterable(xs, length):
-    q = queue.Queue(2)
+def async_iterable(xs, limit=2):
+    q = queue.Queue(limit)
 
     def decode_worker():
         for x in xs:
             q.put(x)
+        q.put(None)
         q.task_done()
 
     threading.Thread(target=decode_worker, daemon=True).start()
-    for i in range(length):
-        yield q.get()
+    while True:
+        x = q.get()
+        if x is None: break
+        else: yield x
         
 
-def key_ocr_generator(path, config: KeyConfig, ocr_args: dict):
+def key_frame_generator(path, config: KeyConfig):
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
-    reader = easyocr.Reader(['ch_tra', 'en'])
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
@@ -214,8 +217,7 @@ def key_ocr_generator(path, config: KeyConfig, ocr_args: dict):
         # Move to CPU. start_frame will not be used for computation.
         start_subtitle_area = subtitle_region(cur_frame)
         start_grey = mask_non_text_area(start_subtitle_area[0], cur_edge, config)
-        start_grey_bounded = bounding_box(start_grey, cur_edge, config)
-        start_ocr = reader.recognize(start_grey_bounded.cpu().numpy())
+        start_frame = bounding_box(start_grey, cur_edge, config).cpu().numpy()
 
         # Clone edge so that in the next batch, previous edge_batch
         # can be deleted.
@@ -228,13 +230,14 @@ def key_ocr_generator(path, config: KeyConfig, ocr_args: dict):
         return {
             "start": start_time/fps,
             "end": cur_time/fps,
-            "ocrs": start_ocr
+            "frame": start_frame
+            #"ocrs": reader.recognize(key['frame'], **easyocr_args)
         }
 
     past_frames = 0
 
     logger.info("Decoding video")
-    for (yuv_batch, ) in tqdm(async_iterable(stream.stream(), num_batch), total=num_batch, desc="Key"):
+    for (yuv_batch, ) in tqdm(async_iterable(stream.stream()), total=num_batch, desc="Key", position=0):
         logger.info("Computing edges")
         edge_batch = subtitle_black_contour(
             subtitle_region(yuv_batch), config.contour)
@@ -322,6 +325,19 @@ def text_for_subtitle(ocr_result):
         if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= max(1,len(r[1])//4)
     ]), locale="zh-cn")
 
+def ocr_text_generator(key_frame_generator, easyocr_args: dict):
+    logger = logging.getLogger('OCR')
+    logger.info("Loading EasyOCR Model")
+    for key in tqdm(async_iterable(key_frame_generator, 0), desc="OCR", position=1):
+        if 'ocrs' in key: yield key
+        else:
+            res = reader.recognize(key['frame'], **easyocr_args)
+            logger.info("%s", res)
+            yield {
+                "start": key["start"],
+                "end": key["end"],
+                "ocrs": res
+            }
 
 def srt_entry_generator(ocrs):
     cnt = 1

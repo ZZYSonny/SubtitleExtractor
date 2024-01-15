@@ -1,3 +1,5 @@
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning) 
 #import os
 #os.environ["TORCHINDUCTOR_MAX_AUTOTUNE"]="1"
 #os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE"]="1"
@@ -85,9 +87,10 @@ def download_anime_by_name(name: str):
 
 
 def convert_subtitle():
-    keys = list(key_ocr_generator(IN_VIDEO_PATH, KeyExtractorConfig, EasyOCRArgs))
+    keys = key_frame_generator(IN_VIDEO_PATH, KeyExtractorConfig)
+    ocrs = list(ocr_text_generator(keys, EasyOCRArgs))
     torch.cuda.empty_cache()
-    srts = list(srt_entry_generator(keys))
+    srts = list(srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
 
