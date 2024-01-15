@@ -24,7 +24,7 @@ SERVE_HTTP = True
 KeyExtractorConfig1080p1x = KeyConfig(
     empty=0.001, 
     diff_tol=0.5,
-    batch_edge=512, 
+    batch_edge=128, 
     batch_window=16, 
     margin=2, 
     contour=ContourConfig(
@@ -85,11 +85,9 @@ def download_anime_by_name(name: str):
 
 
 def convert_subtitle():
-    keys = list(key_frame_generator(IN_VIDEO_PATH, KeyExtractorConfig))
-    #torch.cuda.empty_cache()
-    ocrs = list(ocr_text_generator(keys, EasyOCRArgs))
+    keys = list(key_ocr_generator(IN_VIDEO_PATH, KeyExtractorConfig, EasyOCRArgs))
     torch.cuda.empty_cache()
-    srts = list(srt_entry_generator(ocrs))
+    srts = list(srt_entry_generator(keys))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
 
@@ -121,7 +119,7 @@ def merge_and_serve():
 #我內心
 #name = "憧憬"
 #download_anime_by_name(name)
-#convert_subtitle()
+convert_subtitle()
 merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)

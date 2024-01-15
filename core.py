@@ -12,6 +12,9 @@ import itertools
 import os
 import cv2
 from tqdm import tqdm
+import time
+import queue
+import threading 
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -161,10 +164,23 @@ def post_process(frame, edge, config: KeyConfig):
     frame_box = frame[..., scale*r1:scale*r2, scale*c1:scale*c2]
     return frame_box.to("cpu")
 
+def async_iterable(xs, length):
+    q = queue.Queue(2)
 
-def key_frame_generator(path, config: KeyConfig):
+    def decode_worker():
+        for x in xs:
+            q.put(x)
+        q.task_done()
+
+    threading.Thread(target=decode_worker, daemon=True).start()
+    for i in range(length):
+        yield q.get()
+        
+
+def key_ocr_generator(path, config: KeyConfig, ocr_args: dict):
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
+    reader = easyocr.Reader(['ch_tra', 'en'])
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
@@ -208,16 +224,22 @@ def key_frame_generator(path, config: KeyConfig):
         nonlocal has_start
         assert (has_start)
         has_start = False
+        frame = start_frame.permute([1, 2, 0])
         return {
             "start": start_time/fps,
             "end": cur_time/fps,
-            "frame": start_frame
+            "ocrs": reader.recognize(
+                frame.numpy(),
+                [[0,frame.size(1),0,frame.size(0)]],
+                [],
+                #reformat=False
+            )
         }
 
     past_frames = 0
 
     logger.info("Decoding video")
-    for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key"):
+    for (yuv_batch, ) in tqdm(async_iterable(stream.stream(), num_batch), total=num_batch, desc="Key"):
         logger.info("Computing edges")
         edge_batch = subtitle_black_contour(
             subtitle_region(yuv_batch), config.contour)
@@ -296,22 +318,6 @@ def key_frame_generator(path, config: KeyConfig):
     stream.remove_stream(0)
     if has_start:
         yield release_key_frame(past_frames-1)
-
-
-def ocr_text_generator(key_frame_generator, easyocr_args: dict):
-    logger = logging.getLogger('OCR')
-    logger.info("Loading EasyOCR Model")
-    reader = easyocr.Reader(['ch_tra', 'en'])
-    for key in tqdm(key_frame_generator, desc="OCR"):
-        image = key['frame'].permute([1, 2, 0]).numpy()
-        res = reader.readtext(image, **easyocr_args)
-        logger.info("%s", res)
-        yield {
-            "start": key["start"],
-            "end": key["end"],
-            "ocrs": res
-        }
-
 
 def text_for_subtitle(ocr_result):
     return zhconv.convert("\n".join([
