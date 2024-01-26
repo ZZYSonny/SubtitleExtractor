@@ -65,13 +65,13 @@ def patchwise_broadcast_and(
     configs=[
         triton.Config({
                 "block_n": 1,
-                "block_in_h": 16,
+                "block_in_h": 64,
                 "block_in_w": 128
             },
-            num_warps=1,
+            num_warps=4,
             num_ctas=1,
             num_stages=1
-        )
+        ),
     ], 
     key=['yuv_stride_n', 'yuv_stride_c', 'yuv_stride_h', 'yuv_stride_w'])
 @triton.jit()
