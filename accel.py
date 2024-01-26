@@ -1,6 +1,7 @@
 import os
 #os.environ["TRITON_INTERPRET"]="1"
 import torch
+from torch import _inductor as inductor
 import triton
 import triton.language as tl
 from dataclasses import dataclass
@@ -63,13 +64,14 @@ def patchwise_broadcast_and(
 @triton.autotune(
     configs=[
         triton.Config({
-                "block_n": 1*(8**i),
-                "block_in_h": 16*(4**j),
-                "block_in_w": 16*(4**j)
-            }
+                "block_n": 1,
+                "block_in_h": 16,
+                "block_in_w": 128
+            },
+            num_warps=1,
+            num_ctas=1,
+            num_stages=1
         )
-        for i in range(0, 4)
-        for j in range(0, 2)
     ], 
     key=['yuv_stride_n', 'yuv_stride_c', 'yuv_stride_h', 'yuv_stride_w'])
 @triton.jit()
@@ -159,10 +161,7 @@ def subtitle_black_contour_fusion(yuv: torch.Tensor, config: ContourConfig):
     )
     return out
 
-def subtitle_black_contour_naive(yuv: torch.Tensor, config: ContourConfig):
-    y = yuv[:, 0]
-    u = yuv[:, 1]
-    v = yuv[:, 2]
+def subtitle_black_contour_naive(y: torch.Tensor, u: torch.Tensor, v: torch.Tensor, config: ContourConfig):
     grey_mask = torch.logical_and(
         torch.logical_and(
             u >= 128 - config.tol_uv_grey,
@@ -201,27 +200,24 @@ def subtitle_black_contour_naive(yuv: torch.Tensor, config: ContourConfig):
     ).greater_equal(config.pix_min_black)
     
     if config.patch_white < config.patch_black:
-        black_mask_scaled = black_mask_scaled.repeat_interleave(
-            config.patch_black//config.patch_white, 
-            dim=1
-        ).repeat_interleave(
-            config.patch_black//config.patch_white, 
-            dim=2
-        )
-    elif config.patch_white > config.patch_black:
-        white_mask_scaled = white_mask_scaled.repeat_interleave(
-            config.patch_white//config.patch_black, 
-            dim=1
-        ).repeat_interleave(
-            config.patch_white//config.patch_black, 
-            dim=2
-        )
+        r = config.patch_black//config.patch_white
+        white_mask_scaled = white_mask_scaled.reshape([
+            white_mask_scaled.size(0),
+            white_mask_scaled.size(1) // r, r,
+            white_mask_scaled.size(2) // r, r
+        ])
+        black_mask_scaled = black_mask_scaled[:,:,None,:,None]
+
 
     final = torch.logical_and(
         white_mask_scaled,
         black_mask_scaled
     )
-    return final
+    return final.reshape([
+        final.size(0),
+        final.size(1) * final.size(2),
+        final.size(3) * final.size(4)
+    ])
 
 subtitle_black_contour_compiled = torch.compile(subtitle_black_contour_naive)
 
@@ -235,7 +231,7 @@ config = ContourConfig(
     patch_black=16,
     pix_min_black=1,
 )
-subtitle_black_contour_fusion(x, config)
+#subtitle_black_contour_fusion(x, config)
 print(triton.testing.do_bench(lambda: subtitle_black_contour_fusion(x, config)))
-print(triton.testing.do_bench(lambda: subtitle_black_contour_compiled(x, config)))
-print(triton.testing.do_bench(lambda: subtitle_black_contour_naive(x, config)))
+print(triton.testing.do_bench(lambda: subtitle_black_contour_compiled(x[:,0], x[:,1], x[:,2], config)))
+#print(triton.testing.do_bench(lambda: subtitle_black_contour_naive(x[:,0], x[:,1], x[:,2], config)))
