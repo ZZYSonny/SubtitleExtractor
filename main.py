@@ -24,11 +24,17 @@ OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
 KeyExtractorConfig1080p1x = KeyConfig(
-    empty=0.01, 
+    empty=0.003, 
     diff_tol=0.4,
-    batch_edge=128, 
-    batch_window=16, 
-    margin=3, 
+    batch=3, 
+    box = CropConfig(
+        top=888,
+        down=0,
+        left=448,
+        right=480,
+        width=1920,
+        height=1080
+    ),
     contour=ContourConfig(
         y_tol=32, 
         uv_tol=2, 
@@ -120,9 +126,9 @@ def merge_and_serve():
 #成為魔法少女
 #芙
 #我內心
-name = "芙"
-download_anime_by_name(name)
+#name = "芙"
+#download_anime_by_name(name)
 convert_subtitle()
-merge_and_serve()
+#merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)

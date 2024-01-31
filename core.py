@@ -30,14 +30,21 @@ class ContourConfig:
     white_scale: int
     white_min: int
 
+@dataclass
+class CropConfig:
+    top: int
+    down: int
+    left: int
+    right: int
+    width: int
+    height: int
 
 @dataclass
 class KeyConfig:
     empty: float
     diff_tol: float
-    batch_edge: int
-    batch_window: int
-    margin: int
+    batch: int
+    box: CropConfig
     contour: ContourConfig
     device: str = "cuda"  # "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -143,22 +150,16 @@ def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: KeyConfi
 def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
     return subtitle_black_contour(rgb.unsqueeze(0), config).squeeze(0)
 
-def subtitle_region(rgb: torch.Tensor):
-    return rgb[:, -192:, :]
+#def subtitle_region(rgb: torch.Tensor):
+#    return rgb[:, -192:, :]
 
 def bounding_box(frame, edge, config: KeyConfig):
     scale = min(config.contour.black_scale, config.contour.white_scale)
     # Crop the bounding box
     def bound_1d(xs):
         idx = xs.nonzero()
-        r = max(
-            idx[0].item()-config.margin,
-            0
-        )
-        c = min(
-            idx[-1].item()+1+config.margin,
-            xs.shape[0] - 1
-        )
+        r = idx[0].item()
+        c = idx[-1].item()+1
         return r,c
     r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32))
     c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32))
@@ -191,135 +192,95 @@ def key_frame_generator(path, config: KeyConfig):
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
-    num_batch = int((num_frame + config.batch_edge - 1) // config.batch_edge)
+    num_batch = int((num_frame + config.batch - 1) // config.batch)
     assert (info.codec == "h264")
     assert (info.format == "yuv420p")
 
     fps = info.frame_rate
-    stream.add_video_stream(config.batch_edge,
+    stream.add_video_stream(config.batch,
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
                             decoder_option={
-                                "crop": "888x0x0x0"
+                                "crop": f"{config.box.top}x{config.box.down}x{config.box.left}x{config.box.left}x{config.box.right}"
                             },
                             #filter_desc=f"fps={fps}"
                             )
+    has_start = False
+    start_time = 0.0
+    start_cnt = 0
+    start_frame = torch.empty(0, device="cpu")
+    start_edge = torch.empty(1, device="cuda:0")
 
-    has_start = 0
-    start_time = 0
-    start_frame = torch.empty(0)
-    start_edge = torch.empty(0)
-    start_pix = torch.empty(1)
-    start_ocr = []
-
-    def select_key_frame(cur_time, cur_frame, cur_edge):
-        nonlocal has_start, start_time, start_frame, start_edge, start_pix, start_ocr
-        assert (not has_start)
+    def select_key_frame(cur_time, cur_cnt, cur_frame, cur_edge):
+        nonlocal start_time, start_cnt, start_frame, start_edge, has_start
         has_start = True
         start_time = cur_time
-        start_pix = cur_edge.sum()
-        # Move to CPU. start_frame will not be used for computation.
-        start_subtitle_area = subtitle_region(cur_frame)
-        start_grey = mask_non_text_area(start_subtitle_area[0], cur_edge, config)
+        start_cnt = cur_cnt
+        start_edge = cur_edge
+        start_grey = mask_non_text_area(cur_frame[0], cur_edge, config)
         start_frame = bounding_box(start_grey, cur_edge, config).cpu().numpy()
 
-        # Clone edge so that in the next batch, previous edge_batch
-        # can be deleted.
-        start_edge = cur_edge
-
-    def release_key_frame(cur_time):
+    def release_key_frame(end_time):
         nonlocal has_start
-        assert (has_start)
         has_start = False
         return {
-            "start": start_time/fps,
-            "end": cur_time/fps,
+            "start": start_time,
+            "end": end_time,
             "frame": start_frame
             #"ocrs": reader.recognize(key['frame'], **easyocr_args)
         }
-
-    past_frames = 0
-
+        
+    resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
+    resolution_edge = resolution_native / (min(config.contour.black_scale, config.contour.white_scale)**2)
+    threshold_empty = int(config.empty*resolution_edge)
     logger.info("Decoding video")
-    for (yuv_batch, ) in tqdm(async_iterable(stream.stream()), total=num_batch, desc="Key", position=0):
+    for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
+        pts = yuv_batch.pts
+
         logger.info("Computing edges")
-        edge_batch = subtitle_black_contour(
-            subtitle_region(yuv_batch), config.contour)
-        pixels_batch = edge_batch.int().sum(dim=[1, 2])
-        empty_batch_cpu = pixels_batch.lt(edge_batch[0].numel() * config.empty).cpu()
+        yuv = yuv_batch[:]
+        edge = subtitle_black_contour(yuv, config.contour)
+        cnt = edge.int().sum(dim=[1, 2])
+        diff = torch.logical_xor(edge, start_edge).int().sum(dim=[1, 2])
 
-        window_start: int = 0
-        while window_start != yuv_batch.shape[0]:
-            # Determine current window [cur_start, cur_end]
-            window_end: int = min(
-                window_start + config.batch_window,
-                yuv_batch.shape[0]
-            )
-            loc = f"{past_frames+window_start} -> {past_frames+window_end}"
+        cnt_cpu = cnt.cpu().tolist()
+        diff_cpu = diff.cpu().tolist()
+        
+        if logger.isEnabledFor(logging.DEBUG):
+            time = [
+                pts + i / fps
+                for i in range(yuv.size(0))
+            ]
+            logger.debug("="*20)
+            logger.debug("Time:%s", time)
+            logger.debug("Pixs:%s", cnt_cpu)
+            logger.debug("Diff:%s", diff_cpu)
 
-            if not has_start:
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("="*20)
-                    logger.debug(
-                        "%s Pixs:\n%s\n", loc, pixels_batch[window_start:window_end].tolist())
-
-                non_empty_window_cpu = torch.logical_not(
-                    empty_batch_cpu[window_start:window_end])
-                i = non_empty_window_cpu.nonzero_static(
-                    size=1, fill_value=-1).item()
-                if i == -1:
-                    window_start = window_end
-                    logger.info("%s Empty:", loc)
-                else:
-                    window_start = window_start + i
-                    logger.info("%s Empty -> New Text at Frame %s",
-                                loc, past_frames+window_start)
-                    select_key_frame(
-                        past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
-            else:
-                # Compute diff
-                edge_window = edge_batch[window_start:window_end]
-                diff_window = torch.logical_xor(
-                    edge_window, start_edge).int().sum(dim=[1, 2])
-                diff_thres = torch.min(
-                    start_pix,
-                    pixels_batch[window_start:window_end]
-                ).mul(config.diff_tol).int()
-                changed_window_cpu = diff_window.gt(diff_thres).cpu()
-                empty_window_cpu = empty_batch_cpu[window_start:window_end]
-                stop_window_cpu = torch.logical_or(
-                    changed_window_cpu, empty_window_cpu)
-
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("="*20)
-                    logger.debug("%s Pixs:%s\n", loc,
-                                 pixels_batch[window_start:window_end].tolist())
-                    logger.debug("%s Diff:%s\n", loc, diff_window.tolist())
-
-                i = stop_window_cpu.nonzero_static(
-                    size=1, fill_value=-1).item()
-                if i == -1:
-                    window_start = window_end
-                    logger.info("%s Text:", loc)
-                else:
-                    window_start = window_start + i
-                    yield release_key_frame(past_frames+window_start)
-
-                    if empty_window_cpu[i].item():
-                        logger.info("%s Text -> Empty  at Frame %s",
-                                    loc, past_frames+window_start)
-                    else:
-                        logger.info("%s Text -> New Text at Frame %s",
-                                    loc, past_frames+window_start)
-                        select_key_frame(
-                            past_frames+window_start, yuv_batch[window_start], edge_batch[window_start])
-
-        past_frames += yuv_batch.shape[0]
-        logger.info("Decoding video")
+        # Assume in a batch, the state changes at most once.
+        if not has_start:
+            for i in range(yuv.size(0)):
+                if cnt_cpu[i] > threshold_empty:
+                    cur_time = pts + i / fps
+                    logger.info("Empty -> Text at %s", cur_time)
+                    select_key_frame(cur_time, cnt[i], yuv[i], edge[i])
+                    break
+        else:
+            for i in range(yuv.size(0)):
+                if cnt_cpu[i] < threshold_empty:
+                    cur_time = pts + i / fps
+                    logger.info("Text -> Empty at %s", cur_time)
+                    yield release_key_frame(cur_time)
+                    break
+                if diff_cpu[i] > config.diff_tol * min(start_cnt, cnt[i]):
+                    cur_time = pts + i / fps
+                    logger.info("Text -> New at %s", cur_time)
+                    yield release_key_frame(cur_time)
+                    select_key_frame(cur_time, cnt[i], yuv[i], edge[i])
+                    break
 
     stream.remove_stream(0)
-    if has_start:
-        yield release_key_frame(past_frames-1)
+    if start_time>0:
+        yield release_key_frame(num_frame/fps)
 
 def text_for_subtitle(ocr_result):
     return zhconv.convert("\n".join([
