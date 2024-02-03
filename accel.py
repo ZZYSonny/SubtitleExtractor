@@ -221,7 +221,7 @@ def subtitle_black_contour_naive(y: torch.Tensor, u: torch.Tensor, v: torch.Tens
 
 subtitle_black_contour_compiled = torch.compile(subtitle_black_contour_naive)
 
-x = torch.randint(0,255, (512, 3, 192, 1920,), dtype=torch.uint8, device="cuda")
+x = torch.randint(0,255, (512, 3, 192, 2048,), dtype=torch.uint8, device="cuda")
 config = ContourConfig(
     tol_y_black=32, 
     tol_y_white=32,
