@@ -1,5 +1,5 @@
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning) 
+warnings.filterwarnings('ignore')
 #import os
 #os.environ["TORCHINDUCTOR_MAX_AUTOTUNE"]="1"
 #os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE"]="1"
@@ -23,10 +23,15 @@ OUT_SUBTITLE_PATH = "temp/out.srt"
 OUT_VIDEO_PATH = "temp/out.mkv"
 SERVE_HTTP = True
 
-KeyExtractorConfig1080p1x = KeyConfig(
-    empty=0.003, 
-    diff_tol=0.4,
-    batch=3, 
+RTX2060Config = SubsConfig(
+    exe = ExecConfig(
+        batch = 3,
+        device = "cuda"
+    ),
+    key = KeyConfig(
+        empty=0.003, 
+        diff_tol=0.4,
+    ),
     box = CropConfig(
         top=888,
         down=0,
@@ -42,20 +47,19 @@ KeyExtractorConfig1080p1x = KeyConfig(
         white_min=2,
         black_scale=16,
         black_min=1,
+    ),
+    ocr = dict(
+        # https://www.jaided.ai/easyocr/documentation/
+        blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
+        batch_size=16,
+        #contrast_ths=0.5,
+        #adjust_contrast=0.7,
+        # https://github.com/clovaai/CRAFT-pytorch/issues/51
+        #text_threshold=0.3,
+        #low_text=0.2
     )
 )
-KeyExtractorConfig = KeyExtractorConfig1080p1x
-EasyOCRArgs = dict(
-    # https://www.jaided.ai/easyocr/documentation/
-    blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
-    batch_size=16,
-    #contrast_ths=0.5,
-    #adjust_contrast=0.7,
-    # https://github.com/clovaai/CRAFT-pytorch/issues/51
-    #text_threshold=0.3,
-    #low_text=0.2
-)
-
+config = RTX2060Config
 
 class DownloadProgressBar(tqdm):
     def update_to(self, b=1, bsize=1, tsize=None):
@@ -93,12 +97,12 @@ def download_anime_by_name(name: str):
 
 
 def convert_subtitle():
-    keys = list(key_frame_generator(IN_VIDEO_PATH, KeyExtractorConfig))
-    ocrs = list(ocr_text_generator(keys, EasyOCRArgs))
-    torch.cuda.empty_cache()
+    keys = async_iterable(key_frame_generator(IN_VIDEO_PATH, config))
+    ocrs = async_iterable(ocr_text_generator(keys, config))
     srts = list(srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
+    torch.cuda.empty_cache()
 
     
 def merge_and_serve():

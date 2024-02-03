@@ -40,13 +40,22 @@ class CropConfig:
     height: int
 
 @dataclass
+class ExecConfig:
+    batch: int
+    device: str = "cuda"
+
+@dataclass
 class KeyConfig:
     empty: float
     diff_tol: float
-    batch: int
+
+@dataclass
+class SubsConfig:
+    exe: ExecConfig
+    key: KeyConfig
     box: CropConfig
     contour: ContourConfig
-    device: str = "cuda"  # "cuda" if torch.cuda.is_available() else "cpu"
+    ocr: dict
 
 
 def yuv_to_rgb(frames):
@@ -137,8 +146,8 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     return final
 
 @torch.compile
-def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: KeyConfig):
-    scale = min(config.contour.black_scale, config.contour.white_scale)
+def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: ContourConfig):
+    scale = min(config.black_scale, config.white_scale)
     not_edge_patched = torch.logical_not(edge).repeat_interleave(
         scale, dim=0
     ).repeat_interleave(
@@ -153,8 +162,8 @@ def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
 #def subtitle_region(rgb: torch.Tensor):
 #    return rgb[:, -192:, :]
 
-def bounding_box(frame, edge, config: KeyConfig):
-    scale = min(config.contour.black_scale, config.contour.white_scale)
+def bounding_box(frame, edge, config: ContourConfig):
+    scale = min(config.black_scale, config.white_scale)
     # Crop the bounding box
     def bound_1d(xs):
         idx = xs.nonzero()
@@ -186,18 +195,18 @@ def async_iterable(xs, limit=2):
 
         
 
-def key_frame_generator(path, config: KeyConfig):
+def key_frame_generator(path, config: SubsConfig):
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(path)
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
-    num_batch = int((num_frame + config.batch - 1) // config.batch)
+    num_batch = int((num_frame + config.exe.batch - 1) // config.exe.batch)
     assert (info.codec == "h264")
     assert (info.format == "yuv420p")
 
     fps = info.frame_rate
-    stream.add_video_stream(config.batch,
+    stream.add_video_stream(config.exe.batch,
                             decoder="h264_cuvid",
                             hw_accel="cuda:0",
                             decoder_option={
@@ -217,8 +226,8 @@ def key_frame_generator(path, config: KeyConfig):
         start_time = cur_time
         start_cnt = cur_cnt
         start_edge = cur_edge
-        start_grey = mask_non_text_area(cur_frame[0], cur_edge, config)
-        start_frame = bounding_box(start_grey, cur_edge, config).cpu().numpy()
+        start_grey = mask_non_text_area(cur_frame[0], cur_edge, config.contour)
+        start_frame = bounding_box(start_grey, cur_edge, config.contour).cpu().numpy()
 
     def release_key_frame(end_time):
         nonlocal has_start
@@ -232,7 +241,7 @@ def key_frame_generator(path, config: KeyConfig):
         
     resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
     resolution_edge = resolution_native / (min(config.contour.black_scale, config.contour.white_scale)**2)
-    threshold_empty = int(config.empty*resolution_edge)
+    threshold_empty = int(config.key.empty*resolution_edge)
     logger.info("Decoding video")
     for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
         pts = yuv_batch.pts
@@ -271,7 +280,7 @@ def key_frame_generator(path, config: KeyConfig):
                     logger.info("Text -> Empty at %s", cur_time)
                     yield release_key_frame(cur_time)
                     break
-                if diff_cpu[i] > config.diff_tol * min(start_cnt, cnt[i]):
+                if diff_cpu[i] > config.key.diff_tol * min(start_cnt, cnt[i]):
                     cur_time = pts + i / fps
                     logger.info("Text -> New at %s", cur_time)
                     yield release_key_frame(cur_time)
@@ -325,13 +334,13 @@ def easyocr_readtext(img, easyocr_args: dict):
 
     return ans
 
-def ocr_text_generator(key_frame_generator, easyocr_args: dict):
+def ocr_text_generator(key_frame_generator, config: SubsConfig):
     logger = logging.getLogger('OCR')
     logger.info("Loading EasyOCR Model")
-    for key in tqdm(async_iterable(key_frame_generator, 0), desc="OCR", position=1):
+    for key in tqdm(key_frame_generator, desc="OCR", position=1):
         if 'ocrs' in key: yield key
         else:
-            res_cht = easyocr_readtext(key["frame"], easyocr_args)
+            res_cht = easyocr_readtext(key["frame"], config.ocr)
             res_chs = zhconv.convert(res_cht, locale="zh-cn")
             #res = reader.readtext(key['frame'], **easyocr_args)
             #logger.info("%s", res)
@@ -346,7 +355,7 @@ def srt_entry_generator(ocrs):
     last_start = -1.0
     last_end = -1.0
     last_text = ""
-    for i, ocr in enumerate(ocrs):
+    for i, ocr in tqdm(enumerate(ocrs), desc="SRT", position=2):
         cur_start = ocr["start"]
         cur_end = ocr["end"]
         cur_text = ocr["ocrs"]
@@ -376,31 +385,32 @@ def srt_entry_generator(ocrs):
     ])
 
 
-def debug_contour(path, config: KeyConfig):
-    os.system("rm debug/img/*.png")
-    stream = torchaudio.io.StreamReader(path)
-    stream.add_video_stream(1,
-                            decoder="h264_cuvid",
-                            hw_accel="cuda:0",
-                            decoder_option={
-                                "crop": "888x0x0x0"
-                            }
-                            )
-
-    for i, (yuv_batch,) in enumerate(stream.stream()):
-        #if i!=227: continue
-        yuv_batch = subtitle_region(yuv_batch)
-        rgb_batch = yuv_to_rgb(yuv_batch)
-        edge_batch = subtitle_black_contour(yuv_batch, config.contour)
-
-        torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
-
-        if edge_batch.sum().item() > edge_batch[0].numel() * config.empty:
-            rgb_cut = post_process(
-                rgb_batch[0],
-                edge_batch[0],
-                config
-            )
-            torchvision.io.write_png(bool_to_grey(
-                edge_batch).cpu(), f"debug/img/{i}_.png")
-            torchvision.io.write_png(rgb_cut, f"debug/img/{i}__.png")
+#def debug_contour(path, config: SubsConfig):
+#    os.system("rm debug/img/*.png")
+#    stream = torchaudio.io.StreamReader(path)
+#    stream.add_video_stream(1,
+#                            decoder="h264_cuvid",
+#                            hw_accel="cuda:0",
+#                            decoder_option={
+#                                "crop": "888x0x0x0"
+#                            }
+#                            )
+#
+#    for i, (yuv_batch,) in enumerate(stream.stream()):
+#        #if i!=227: continue
+#        yuv_batch = subtitle_region(yuv_batch)
+#        rgb_batch = yuv_to_rgb(yuv_batch)
+#        edge_batch = subtitle_black_contour(yuv_batch, config.contour)
+#
+#        torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
+#
+#        if edge_batch.sum().item() > edge_batch[0].numel() * config.empty:
+#            rgb_cut = post_process(
+#                rgb_batch[0],
+#                edge_batch[0],
+#                config
+#            )
+#            torchvision.io.write_png(bool_to_grey(
+#                edge_batch).cpu(), f"debug/img/{i}_.png")
+#            torchvision.io.write_png(rgb_cut, f"debug/img/{i}__.png")
+#
