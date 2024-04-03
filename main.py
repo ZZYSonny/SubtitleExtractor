@@ -35,8 +35,8 @@ RTX2060Config = SubsConfig(
     box = CropConfig(
         top=888,
         down=0,
-        left=448,
-        right=480,
+        left=192,
+        right=192,
         width=1920,
         height=1080
     ),
@@ -130,9 +130,9 @@ def merge_and_serve():
 #成為魔法少女
 #芙
 #我內心
-#name = "芙"
-#download_anime_by_name(name)
+name = "芙"
+download_anime_by_name(name)
 convert_subtitle()
-#merge_and_serve()
+merge_and_serve()
 
 #debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
