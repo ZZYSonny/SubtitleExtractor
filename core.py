@@ -240,13 +240,13 @@ def key_frame_generator(path, config: SubsConfig):
     def release_key_frame(end_time):
         nonlocal has_start, start_time
         has_start = False
-        start_time = 0.0
-        return {
+        key = {
             "start": start_time,
             "end": end_time,
             "frame": start_frame
-            #"ocrs": reader.recognize(key['frame'], **easyocr_args)
         }
+        start_time = 0.0
+        return key
         
     resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
     resolution_edge = resolution_native / (min(config.contour.black_scale, config.contour.white_scale)**2)
@@ -300,75 +300,29 @@ def key_frame_generator(path, config: SubsConfig):
     if start_time>0:
         yield release_key_frame(num_frame/fps)
 
-def text_for_subtitle(ocr_result):
-    return zhconv.convert("\n".join([
-        r[1]
-        for r in ocr_result
-        if not r[1].isdigit() and r[0][2][1] - r[0][0][1] > 30
-        if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= max(1,len(r[1])//4)
-    ]), locale="zh-cn")
-
-pic_id = 0
-def easyocr_readtext(img, easyocr_args: dict):
-    threshold = 16
-    ans = ""
-
-    def x_split(img):
-        flag = img.sum(axis=1) > threshold
-
-        start = None
-        for i in range(flag.shape[0]):
-            if flag[i]:
-                if start is None:
-                    start = i
-            else:
-                if start is not None:
-                    if i - start > threshold: yield [start, i]
-                    start = None
-
-        if(start!=None):
-            yield[start, flag.shape[0]]
-
-    def y_fit(img, x_start, x_end):
-        flag = (img[x_start:x_end].sum(axis=0) > threshold).nonzero()[0]
-        return [flag[0], flag[-1]]
-
-    def padding(x0,x1,y1,y2,pad):
-        return [max(0, x0-pad), min(x1+pad, img.shape[0]), max(0, y1-pad), min(y2+pad, img.shape[1])]
-
-    for x_start, x_end in x_split(img):
-        y_start, y_end = y_fit(img, x_start, x_end)
-        x_start, x_end, y_start, y_end = padding(x_start, x_end, y_start, y_end, 32)
-        img_slice = img[x_start:x_end, y_start:y_end]
-
-        rec = reader.recognize(img_slice, detail=0, paragraph=True, contrast_ths=0.6, **easyocr_args)
-        ans += " ".join(rec) + "\n"
-        if True:
-            if any(
-                pir[2] < 0.2
-                for pir in reader.recognize(img_slice, detail=1, paragraph=False, contrast_ths=0.6, **easyocr_args)
-            ):
-                global pic_id
-                torchvision.io.write_png(torch.from_numpy(img_slice)[None,:], f"./debug/error/{pic_id}_{rec}.png")
-                pic_id += 1
-                print("HERE")
-
-    return ans
-
 def ocr_text_generator(key_frame_generator, config: SubsConfig):
     logger = logging.getLogger('OCR')
     logger.info("Loading EasyOCR Model")
     for key in tqdm(key_frame_generator, desc="OCR", position=1):
         if 'ocrs' in key: yield key
         else:
-            res_cht = easyocr_readtext(key["frame"], config.ocr)
-            res_chs = zhconv.convert(res_cht, locale="zh-cn")
-            logger.info("%s", res_chs)
-            yield {
-                "start": key["start"],
-                "end": key["end"],
-                "ocrs": res_chs
-            }
+            res_raw = reader.readtext(key["frame"], detail=True, paragraph=False, **config.ocr)
+            res_cht = "\n".join(p[1] for p in res_raw)
+            min_confidence = min(p[2] for p in res_raw)
+            if min_confidence > 0.2:
+                res_chs = zhconv.convert(res_cht, locale="zh-cn")
+                logger.info("%s", res_chs)
+                yield {
+                    "start": key["start"],
+                    "end": key["end"],
+                    "ocrs": res_chs
+                }
+            elif LOGLEVEL=="DEBUG":
+                torchvision.io.write_png(
+                    torch.from_numpy(key["frame"]).unsqueeze(0),
+                    f"debug/error/{key['start']:.2f}_{min_confidence:.2f}_{res_cht}.png"
+                )
+
 
 def srt_entry_generator(ocrs):
     cnt = 1

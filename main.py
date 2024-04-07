@@ -28,7 +28,7 @@ SERVE_HTTP = True
 
 RTX2060Config = SubsConfig(
     exe = ExecConfig(
-        batch = 1,
+        batch = 3,
         device = "cuda"
     ),
     key = KeyConfig(
@@ -48,16 +48,15 @@ RTX2060Config = SubsConfig(
         y_white_tol=32, 
         uv_tol=2, 
         white_scale=4,
-        white_min=2,
-        black_scale=16,
+        white_min=1,
+        black_scale=32,
         black_min=1,
     ),
     ocr = dict(
         # https://www.jaided.ai/easyocr/documentation/
-        blocklist="`~@#$%^&*_+={}[]|\\:;<>/",
+        blocklist=" `~@#$%^&*_+={}[]|\\:;<>/",
         batch_size=16,
-        #contrast_ths=0.5,
-        #adjust_contrast=0.7,
+        contrast_ths=0,
         # https://github.com/clovaai/CRAFT-pytorch/issues/51
         #text_threshold=0.3,
         #low_text=0.2
@@ -102,8 +101,7 @@ def download_anime_by_name(name: str):
 
 def convert_subtitle():
     keys = async_iterable(key_frame_generator(IN_VIDEO_PATH, config))
-    ocrs = list(ocr_text_generator(keys, config))
-    exit()
+    ocrs = async_iterable(ocr_text_generator(keys, config))
     srts = list(srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
