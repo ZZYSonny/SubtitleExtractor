@@ -46,10 +46,12 @@ RTX2060Config = SubsConfig(
     contour=ContourConfig(
         y_black_tol=16,
         y_white_tol=32, 
-        uv_tol=2, 
-        white_scale=4,
+        uv_tol=2,
+        white_x_scale=4,
+        white_y_scale=4,
         white_min=1,
-        black_scale=32,
+        black_x_scale=16,
+        black_y_scale=64,
         black_min=1,
     ),
     ocr = dict(

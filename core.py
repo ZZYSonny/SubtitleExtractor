@@ -27,9 +27,11 @@ class ContourConfig:
     y_white_tol: int
     y_black_tol: int
     uv_tol: int
-    black_scale: int
+    black_x_scale: int
+    black_y_scale: int
     black_min: int
-    white_scale: int
+    white_x_scale: int
+    white_y_scale: int
     white_min: int
 
 @dataclass
@@ -108,8 +110,8 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     white_mask_scaled = torch.sum(
         white_mask.reshape([
             y.size(0), 
-            y.size(1)//config.white_scale, config.white_scale, 
-            y.size(2)//config.white_scale, config.white_scale, 
+            y.size(1)//config.white_x_scale, config.white_x_scale, 
+            y.size(2)//config.white_y_scale, config.white_y_scale, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
@@ -117,27 +119,34 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     black_mask_scaled = torch.sum(
         black_mask.reshape([
             y.size(0), 
-            y.size(1)//config.black_scale, config.black_scale, 
-            y.size(2)//config.black_scale, config.black_scale, 
+            y.size(1)//config.black_x_scale, config.black_x_scale, 
+            y.size(2)//config.black_y_scale, config.black_y_scale, 
         ]),
         dim=[2,4],
         dtype=torch.uint8
     ).greater_equal(config.black_min)
     
-    if config.white_scale < config.black_scale:
+    if config.white_x_scale < config.black_x_scale:
         black_mask_scaled = black_mask_scaled.repeat_interleave(
-            config.black_scale//config.white_scale, 
+            config.black_x_scale//config.white_x_scale, 
             dim=1
-        ).repeat_interleave(
-            config.black_scale//config.white_scale, 
+        )
+
+    if config.white_y_scale < config.black_y_scale:
+        black_mask_scaled = black_mask_scaled.repeat_interleave(
+            config.black_y_scale//config.white_y_scale, 
             dim=2
         )
-    elif config.white_scale > config.black_scale:
+
+    if config.white_x_scale > config.black_x_scale:
         white_mask_scaled = white_mask_scaled.repeat_interleave(
-            config.white_scale//config.black_scale, 
+            config.white_x_scale//config.black_x_scale, 
             dim=1
-        ).repeat_interleave(
-            config.white_scale//config.black_scale, 
+        )
+
+    if config.white_y_scale > config.black_y_scale:
+        white_mask_scaled = white_mask_scaled.repeat_interleave(
+            config.white_y_scale//config.black_y_scale, 
             dim=2
         )
 
@@ -149,11 +158,12 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
 
 @torch.compile
 def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: ContourConfig):
-    scale = min(config.black_scale, config.white_scale)
+    scale_x = min(config.black_x_scale, config.white_x_scale)
+    scale_y = min(config.black_y_scale, config.white_y_scale)
     not_edge_patched = torch.logical_not(edge).repeat_interleave(
-        scale, dim=0
+        scale_x, dim=0
     ).repeat_interleave(
-        scale, dim=1
+        scale_y, dim=1
     )
     frame[not_edge_patched] = 0
     return frame
@@ -165,7 +175,8 @@ def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
 #    return rgb[:, -192:, :]
 
 def bounding_box(frame, edge, config: ContourConfig):
-    scale = min(config.black_scale, config.white_scale)
+    scale_x = min(config.black_x_scale, config.white_x_scale)
+    scale_y = min(config.black_y_scale, config.white_y_scale)
     # Crop the bounding box
     def bound_1d(xs):
         idx = xs.nonzero()
@@ -174,7 +185,7 @@ def bounding_box(frame, edge, config: ContourConfig):
         return r,c
     r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32))
     c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32))
-    frame_box = frame[..., scale*r1:scale*r2, scale*c1:scale*c2]
+    frame_box = frame[..., scale_x*r1:scale_x*r2, scale_y*c1:scale_y*c2]
     return frame_box
 
 def async_iterable(xs, limit=2):
@@ -250,7 +261,7 @@ def key_frame_generator(path, config: SubsConfig):
         return key
         
     resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
-    resolution_edge = resolution_native / (min(config.contour.black_scale, config.contour.white_scale)**2)
+    resolution_edge = resolution_native / min(config.contour.black_x_scale, config.contour.white_x_scale) / min(config.contour.black_y_scale, config.contour.white_y_scale)
     threshold_empty = int(config.key.empty*resolution_edge)
     logger.info("Decoding video")
     for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
