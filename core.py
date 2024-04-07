@@ -15,6 +15,7 @@ from tqdm import tqdm
 import time
 import queue
 import threading 
+import numpy as np
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -306,10 +307,11 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
     for key in tqdm(key_frame_generator, desc="OCR", position=1):
         if 'ocrs' in key: yield key
         else:
-            res_raw = reader.readtext(key["frame"], detail=True, paragraph=False, **config.ocr)
+            img = np.pad(key["frame"], pad_width=16, mode='constant', constant_values=0)
+            res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
-            min_confidence = min(p[2] for p in res_raw)
-            if min_confidence > 0.2:
+            min_confidence = min((p[2] for p in res_raw), default=0)
+            if min_confidence >= 0.2:
                 res_chs = zhconv.convert(res_cht, locale="zh-cn")
                 logger.info("%s", res_chs)
                 yield {
