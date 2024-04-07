@@ -226,12 +226,20 @@ def key_frame_generator(path, config: SubsConfig):
         start_time = cur_time
         start_cnt = cur_cnt
         start_edge = cur_edge
+        if False:
+            torchvision.io.write_png(yuv_to_rgb(cur_frame).cpu(), f"debug/img/{start_time}_in.png")
+            torchvision.io.write_png(cur_frame[0][None,:].cpu(), f"debug/img/{start_time}_y.png")
+            torchvision.io.write_png(cur_frame[1][None,:].cpu(), f"debug/img/{start_time}_u.png")
+            torchvision.io.write_png(cur_frame[2][None,:].cpu(), f"debug/img/{start_time}_v.png")
+            torch.save(cur_frame, f"debug/img/{start_time}.pt")
+            #torchvision.io.write_png(torch.from_numpy(start_frame)[None,:], f"debug/img/{start_time}_out.png")
         start_grey = mask_non_text_area(cur_frame[0], cur_edge, config.contour)
         start_frame = bounding_box(start_grey, cur_edge, config.contour).cpu().numpy()
 
     def release_key_frame(end_time):
-        nonlocal has_start
+        nonlocal has_start, start_time
         has_start = False
+        start_time = 0.0
         return {
             "start": start_time,
             "end": end_time,
@@ -299,6 +307,7 @@ def text_for_subtitle(ocr_result):
         if sum(1 if '\u4e00' <= c <= '\u9fff' else 0 for c in r[1]) >= max(1,len(r[1])//4)
     ]), locale="zh-cn")
 
+pic_id = 0
 def easyocr_readtext(img, easyocr_args: dict):
     threshold = 16
     ans = ""
@@ -329,8 +338,19 @@ def easyocr_readtext(img, easyocr_args: dict):
     for x_start, x_end in x_split(img):
         y_start, y_end = y_fit(img, x_start, x_end)
         x_start, x_end, y_start, y_end = padding(x_start, x_end, y_start, y_end, 32)
-        rec = reader.recognize(img[x_start:x_end, y_start:y_end], detail=0, paragraph=True, contrast_ths=0.6, **easyocr_args)
+        img_slice = img[x_start:x_end, y_start:y_end]
+
+        rec = reader.recognize(img_slice, detail=0, paragraph=True, contrast_ths=0.6, **easyocr_args)
         ans += " ".join(rec) + "\n"
+        if True:
+            if any(
+                pir[2] < 0.2
+                for pir in reader.recognize(img_slice, detail=1, paragraph=False, contrast_ths=0.6, **easyocr_args)
+            ):
+                global pic_id
+                torchvision.io.write_png(torch.from_numpy(img_slice)[None,:], f"./debug/error/{pic_id}_{rec}.png")
+                pic_id += 1
+                print("HERE")
 
     return ans
 
@@ -342,8 +362,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
         else:
             res_cht = easyocr_readtext(key["frame"], config.ocr)
             res_chs = zhconv.convert(res_cht, locale="zh-cn")
-            #res = reader.readtext(key['frame'], **easyocr_args)
-            #logger.info("%s", res)
+            logger.info("%s", res_chs)
             yield {
                 "start": key["start"],
                 "end": key["end"],

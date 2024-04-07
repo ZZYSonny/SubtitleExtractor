@@ -1,3 +1,6 @@
+import os
+os.system("rm -rf /home/zzysonny/Documents/Code/Projects/SubtitleExtractor/debug/img/*")
+os.system("rm -rf /home/zzysonny/Documents/Code/Projects/SubtitleExtractor/debug/error/*")
 import warnings
 warnings.filterwarnings('ignore')
 #import os
@@ -25,7 +28,7 @@ SERVE_HTTP = True
 
 RTX2060Config = SubsConfig(
     exe = ExecConfig(
-        batch = 3,
+        batch = 1,
         device = "cuda"
     ),
     key = KeyConfig(
@@ -41,7 +44,7 @@ RTX2060Config = SubsConfig(
         height=1080
     ),
     contour=ContourConfig(
-        y_tol=32, 
+        y_tol=64, 
         uv_tol=2, 
         white_scale=4,
         white_min=2,
@@ -98,7 +101,8 @@ def download_anime_by_name(name: str):
 
 def convert_subtitle():
     keys = async_iterable(key_frame_generator(IN_VIDEO_PATH, config))
-    ocrs = async_iterable(ocr_text_generator(keys, config))
+    ocrs = list(ocr_text_generator(keys, config))
+    exit()
     srts = list(srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
@@ -126,12 +130,20 @@ def merge_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
             httpd.serve_forever()
 
-#公主殿下
-#成為魔法少女
-#芙
-#我內心
-name = "芙"
-download_anime_by_name(name)
+#周三:
+#美好的世界
+#周四:
+#(搖曳露營)
+#(迷宫饭)
+#周五:
+#GIRLS BAND CRY
+#(史萊姆)
+#周日:
+#夜晚的水母?
+#无职转生
+#(蔚蓝档案)
+#name = "搖曳露營"
+#download_anime_by_name(name)
 convert_subtitle()
 merge_and_serve()
 
