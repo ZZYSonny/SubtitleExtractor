@@ -44,7 +44,8 @@ RTX2060Config = SubsConfig(
         height=1080
     ),
     contour=ContourConfig(
-        y_tol=64, 
+        y_black_tol=16,
+        y_white_tol=32, 
         uv_tol=2, 
         white_scale=4,
         white_min=2,

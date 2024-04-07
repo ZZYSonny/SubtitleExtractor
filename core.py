@@ -18,12 +18,13 @@ import threading
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
-reader = easyocr.Reader(['ch_tra', 'en'])
+reader = easyocr.Reader(['ch_tra'])
 
 
 @dataclass
 class ContourConfig:
-    y_tol: int
+    y_white_tol: int
+    y_black_tol: int
     uv_tol: int
     black_scale: int
     black_min: int
@@ -96,11 +97,11 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
         )
     )
     white_mask = torch.logical_and(
-        y > 255-config.y_tol,
+        y > 255-config.y_white_tol,
         grey_mask
     )
     black_mask = torch.logical_and(
-        y < config.y_tol,
+        y < config.y_black_tol,
         grey_mask
     )
     white_mask_scaled = torch.sum(
