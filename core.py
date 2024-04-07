@@ -333,7 +333,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
             elif LOGLEVEL=="DEBUG":
                 torchvision.io.write_png(
                     torch.from_numpy(key["frame"]).unsqueeze(0),
-                    f"debug/error/{key['start']:.2f}_{min_confidence:.2f}_{res_cht}.png"
+                    f"debug/error/{key['start']:0>6.1f}_{min_confidence:.2f}_{res_cht}.png"
                 )
 
 
