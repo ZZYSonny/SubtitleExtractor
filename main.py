@@ -53,6 +53,8 @@ RTX2060Config = SubsConfig(
         black_x_scale=16,
         black_y_scale=64,
         black_min=1,
+        abs_min_x=2,
+        abs_min_y=2,
     ),
     ocr = dict(
         # https://www.jaided.ai/easyocr/documentation/

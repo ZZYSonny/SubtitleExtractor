@@ -33,6 +33,8 @@ class ContourConfig:
     white_x_scale: int
     white_y_scale: int
     white_min: int
+    abs_min_x: int
+    abs_min_y: int
 
 @dataclass
 class CropConfig:
@@ -178,13 +180,16 @@ def bounding_box(frame, edge, config: ContourConfig):
     scale_x = min(config.black_x_scale, config.white_x_scale)
     scale_y = min(config.black_y_scale, config.white_y_scale)
     # Crop the bounding box
-    def bound_1d(xs):
-        idx = xs.nonzero()
-        r = idx[0].item()
-        c = idx[-1].item()+1
-        return r,c
-    r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32))
-    c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32))
+    def bound_1d(xs, tol):
+        idx = xs.greater(tol).nonzero()
+        if idx.size(0) == 0:
+            return 0,0
+        else:
+            r = idx[0].item()
+            c = idx[-1].item()+1
+            return r,c
+    r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32), config.abs_min_x)
+    c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32), config.abs_min_y)
     frame_box = frame[..., scale_x*r1:scale_x*r2, scale_y*c1:scale_y*c2]
     return frame_box
 
