@@ -68,21 +68,14 @@ RTX2060Config = SubsConfig(
 )
 config = RTX2060Config
 
-class DownloadProgressBar(tqdm):
-    def update_to(self, b=1, bsize=1, tsize=None):
-        self.update(b * bsize - self.n)
-
-
-def download_anime_by_name(name: str):
+def get_anime_link_from_ani_xml(name: str):
     # 获取RSS
     proxy = urllib.request.ProxyHandler(urllib.request.getproxies())
     opener = urllib.request.build_opener(proxy)
     opener.addheaders = [('User-agent', 'Mozilla/5.0')]
     urllib.request.install_opener(opener)
-    with DownloadProgressBar(unit='B', unit_scale=True,
-                             miniters=1, desc="下载RSS") as t:
-        urllib.request.urlretrieve(
-            RSS_URL, filename=RSS_PATH, reporthook=t.update_to)
+    print("下载RSS")
+    urllib.request.urlretrieve(RSS_URL, filename=RSS_PATH)
 
     for item in reversed(ET.parse(RSS_PATH).getroot().findall('./channel/item')):
         title = item.find("title").text
@@ -94,13 +87,23 @@ def download_anime_by_name(name: str):
 
         if name in title:
             print(f"发现视频 {title}")
-            with DownloadProgressBar(unit='B', unit_scale=True, total=size,
-                                     miniters=1, desc="下载视频") as t:
-                urllib.request.urlretrieve(
-                    link, filename=IN_VIDEO_PATH, reporthook=t.update_to)
-            return
+            return link, size
 
     raise Exception("未发现视频")
+
+def get_anime_link_from_ani_folder(folder: str):
+    pass
+
+def download_anime_from_link(link: str, size: int | None = None):
+    class DownloadProgressBar(tqdm):
+        def update_to(self, b=1, bsize=1, tsize=None):
+            self.update(b * bsize - self.n)
+
+    with DownloadProgressBar(unit='B', unit_scale=True, total=size,
+                             miniters=1, desc="下载视频") as t:
+        urllib.request.urlretrieve(
+            link, filename=IN_VIDEO_PATH, reporthook=t.update_to)
+
 
 
 def convert_subtitle():
@@ -133,21 +136,3 @@ def merge_and_serve():
             print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
             httpd.serve_forever()
 
-#周三:
-#美好的世界
-#周四:
-#(搖曳露營)
-#(迷宫饭)
-#周五:
-#GIRLS BAND CRY
-#(史萊姆)
-#周日:
-#夜晚的水母?
-#无职转生
-#(蔚蓝档案)
-#name = "搖曳露營"
-#download_anime_by_name(name)
-convert_subtitle()
-merge_and_serve()
-
-#debug_contour(IN_VIDEO_PATH, KeyExtractorConfig)
