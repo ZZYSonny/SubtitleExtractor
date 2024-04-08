@@ -18,9 +18,11 @@ from core import *
 import http.server
 import socket
 import socketserver
+import requests
+import json
 
+UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
 RSS_URL = "https://api.ani.rip/ani-download.xml"
-RSS_PATH = "temp/rss.xml"
 IN_VIDEO_PATH = "temp/in.mp4"
 OUT_SUBTITLE_PATH = "temp/out.srt"
 OUT_VIDEO_PATH = "temp/out.mkv"
@@ -70,41 +72,42 @@ config = RTX2060Config
 
 def get_anime_link_from_ani_xml(name: str):
     # 获取RSS
-    proxy = urllib.request.ProxyHandler(urllib.request.getproxies())
-    opener = urllib.request.build_opener(proxy)
-    opener.addheaders = [('User-agent', 'Mozilla/5.0')]
-    urllib.request.install_opener(opener)
     print("下载RSS")
-    urllib.request.urlretrieve(RSS_URL, filename=RSS_PATH)
+    response = requests.get(f'https://api.ani.rip/ani-download.xml', header={'user-agent': UA})
 
-    for item in reversed(ET.parse(RSS_PATH).getroot().findall('./channel/item')):
+    for item in reversed(ET.ElementTree(ET.fromstring(response.text)).findall("./channel/item")):
         title = item.find("title").text
         link = item.find("link").text
-        size_elem = [child for child in item if child.tag.endswith("size")]
-        size = None
-        if len(size_elem)==1:
-            size = int(float(size_elem[0].text.split(" ")[0])*1024*1024)
-
+        size = float(item.find("{https://open.ani-download.workers.dev}size").text.split(" ")[0])
         if name in title:
             print(f"发现视频 {title}")
             return link, size
 
     raise Exception("未发现视频")
 
-def get_anime_link_from_ani_folder(folder: str):
-    pass
+def get_anime_link_from_ani_folder(folder: str, name:str):
+    headers = {'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'}
+    data = '{"password":"null"}'
+    response = requests.post(f'https://aniopen.an-i.workers.dev/{folder}/', headers={'user-agent': UA}, data=data)
+
+    for info in json.loads(response.text)['files']:
+        if name in info["name"]:
+            print(f"发现视频 {info['name']}")
+            encoded = urllib.parse.quote(info['name'])
+            url = f"https://aniopen.an-i.workers.dev/{folder}/{encoded}"
+            size = int(float(info["size"])/1024/1024)
+            return url, size
+    raise Exception("未发现视频")
 
 def download_anime_from_link(link: str, size: int | None = None):
-    class DownloadProgressBar(tqdm):
-        def update_to(self, b=1, bsize=1, tsize=None):
-            self.update(b * bsize - self.n)
+    response = requests.get(link, headers={'user-agent': UA}, stream=True)
+    pbar = tqdm(desc="下载视频", total=size*1024*1024, unit='B', unit_scale=True)
 
-    with DownloadProgressBar(unit='B', unit_scale=True, total=size,
-                             miniters=1, desc="下载视频") as t:
-        urllib.request.urlretrieve(
-            link, filename=IN_VIDEO_PATH, reporthook=t.update_to)
-
-
+    with open(IN_VIDEO_PATH, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=1024):
+            f.write(chunk)
+            pbar.update(len(chunk))
+    pbar.close()
 
 def convert_subtitle():
     keys = async_iterable(key_frame_generator(IN_VIDEO_PATH, config))

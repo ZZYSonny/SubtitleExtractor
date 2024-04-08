@@ -5,3 +5,4 @@ __pycache__
 *.srt
 *.mp4
 *.mkv
+main.py
