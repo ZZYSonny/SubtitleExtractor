@@ -5,18 +5,25 @@ channels:
   - conda-forge
   - defaults
 dependencies:
+  # Basic
   - python=3.10
-  - pytorch=2.1.*=*cuda*
-  - torchvision
-  - torchaudio
-  - av
-  - easyocr
+  - pytorch=2.2.*=*cuda*
   - ffmpeg
   # Tools
   - ipykernel
   - matplotlib
   - autopep8
   - tqdm
+  # CN_TRA -> CN_SIMP
+  - torchvision
+  - torchaudio
+  - easyocr
+  # EN -> CN_SIMP
+  - tabulate
+  - transformers
+  - accelerate
+  - sentencepiece
   - pip
   - pip:
     - zhconv
+    - cpmkernels
