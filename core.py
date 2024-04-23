@@ -86,7 +86,31 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
-@torch.compile
+#@torch.compile
+def upper_lower_mask(src: torch.Tensor, out: torch.Tensor):
+    B, R, C = src.shape
+    INF = 2*R
+    bound1 = torch.full((B,C), INF, dtype=torch.int32, device=src.device)
+    for i in range(R):
+        rv = torch.where(src[:,i], i, INF)
+        bound1 = torch.min(bound1, rv)
+
+    bound2 = torch.full((B,C), -INF, dtype=torch.int32, device=src.device)
+    for i in range(R-1, -1, -1):
+        rv = torch.where(src[:,i], i, -INF)
+        bound2 = torch.max(bound2, rv)
+
+    idx = torch.arange(R, device=src.device)
+    mask = torch.logical_and(
+        bound1[:,None,:] <= idx[None,:,None],
+        bound2[:,None,:] >= idx[None,:,None]
+    )
+    out = torch.where(mask, out, False)
+    return out
+    
+
+
+#@torch.compile
 def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     y = yuv[:, 0]
     u = yuv[:, 1]
@@ -158,17 +182,17 @@ def subtitle_black_contour(yuv: torch.Tensor, config: ContourConfig):
     )
     return final
 
-@torch.compile
+#@torch.compile
 def mask_non_text_area(frame: torch.Tensor, edge: torch.Tensor, config: ContourConfig):
     scale_x = min(config.black_x_scale, config.white_x_scale)
     scale_y = min(config.black_y_scale, config.white_y_scale)
-    not_edge_patched = torch.logical_not(edge).repeat_interleave(
+    edge_rescaled = edge.repeat_interleave(
         scale_x, dim=0
     ).repeat_interleave(
         scale_y, dim=1
     )
-    frame[not_edge_patched] = 0
-    return frame
+    masked = torch.where(edge_rescaled, frame, 0)
+    return masked
 
 def subtitle_black_contour_single(rgb: torch.Tensor, config: ContourConfig):
     return subtitle_black_contour(rgb.unsqueeze(0), config).squeeze(0)
@@ -244,13 +268,15 @@ def key_frame_generator(path, config: SubsConfig):
         start_time = cur_time
         start_cnt = cur_cnt
         start_edge = cur_edge
-        if False:
-            torchvision.io.write_png(yuv_to_rgb(cur_frame).cpu(), f"debug/img/{start_time}_in.png")
-            torchvision.io.write_png(cur_frame[0][None,:].cpu(), f"debug/img/{start_time}_y.png")
-            torchvision.io.write_png(cur_frame[1][None,:].cpu(), f"debug/img/{start_time}_u.png")
-            torchvision.io.write_png(cur_frame[2][None,:].cpu(), f"debug/img/{start_time}_v.png")
-            torch.save(cur_frame, f"debug/img/{start_time}.pt")
-            #torchvision.io.write_png(torch.from_numpy(start_frame)[None,:], f"debug/img/{start_time}_out.png")
+        if start_time > 93.3 and LOGLEVEL == "DEBUG":
+            start_time_str = round(start_time, 1)
+            torch.save(cur_frame, f"debug/img/{start_time_str}.pt")
+            torchvision.io.write_png(yuv_to_rgb(cur_frame).cpu(), f"debug/img/{start_time_str}_in.png")
+            #torchvision.io.write_png(cur_frame[0][None,:].cpu(), f"debug/img/{start_time_str}_y.png")
+            #torchvision.io.write_png(cur_frame[1][None,:].cpu(), f"debug/img/{start_time_str}_u.png")
+            #torchvision.io.write_png(cur_frame[2][None,:].cpu(), f"debug/img/{start_time_str}_v.png")
+            torchvision.io.write_png(start_edge.unsqueeze(0).to(torch.uint8).mul(255).cpu(), f"debug/img/{start_time_str}_edge.png")
+            #torchvision.io.write_png(torch.from_numpy(start_frame)[None,:], f"debug/img/{start_time_str}_out.png")
         start_grey = mask_non_text_area(cur_frame[0], cur_edge, config.contour)
         start_frame = bounding_box(start_grey, cur_edge, config.contour).cpu().numpy()
 

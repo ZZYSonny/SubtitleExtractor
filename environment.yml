@@ -12,18 +12,11 @@ dependencies:
   # Tools
   - ipykernel
   - matplotlib
-  - autopep8
   - tqdm
   # CN_TRA -> CN_SIMP
   - torchvision
   - torchaudio
   - easyocr
-  # EN -> CN_SIMP
-  - tabulate
-  - transformers
-  - accelerate
-  - sentencepiece
   - pip
   - pip:
     - zhconv
-    - cpmkernels

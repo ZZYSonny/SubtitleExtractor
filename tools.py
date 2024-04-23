@@ -28,7 +28,8 @@ HEADER = {
     "upgrade-insecure-requests": "1"
 }
 RSS_URL = "https://api.ani.rip/ani-download.xml"
-TEMP_DIR = tempfile.TemporaryDirectory(prefix="subs").name
+#TEMP_DIR = tempfile.TemporaryDirectory(prefix="subs").name
+TEMP_DIR = "./temp"
 IN_VIDEO_PATH = osp.join(TEMP_DIR, "in.mp4")
 OUT_SUBTITLE_PATH = osp.join(TEMP_DIR, "in.mp4")
 OUT_VIDEO_PATH = osp.join(TEMP_DIR, "in.mp4")
