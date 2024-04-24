@@ -6,4 +6,4 @@ __pycache__
 *.mp4
 *.mkv
 *.ipynb
-main.py
+main*.py
