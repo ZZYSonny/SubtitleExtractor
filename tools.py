@@ -5,7 +5,7 @@ import os.path as osp
 import urllib.request
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
-from core import *
+from control import *
 import http.server
 import socket
 import socketserver
