@@ -4,7 +4,7 @@ import triton.language as tl
 
 from dataclasses import dataclass
 @dataclass
-class TextFilter:
+class FilterConfig:
     block_col: int
     max_text_row: int
     
@@ -183,7 +183,7 @@ def triton_filter_text(
         white_pixel = (y >= tl.full([1], 255-config_range_y_white, tl.uint8)) & grey_pixel
         mask = tl.reduce((low <= i) & (i <= high), 0, elementwise_or)
         out = tl.where(white_pixel & mask, y, tl.full([1], 0, tl.uint8))
-        tl.store(out_offset, white_pixel & mask)
+        tl.store(out_offset, out)
 
         y_offset += yuv_stride_row
         out_offset += out_stride_row
@@ -191,15 +191,15 @@ def triton_filter_text(
 
 def scan_text_boundary(
     yuv: torch.Tensor,
-    config: TextFilter
+    config: FilterConfig
 ):
     bound_low_high = torch.empty(
-        size = [2, yuv.shape[0], config.max_text_row, yuv.shape[-1]],
+        size = [yuv.shape[0], 2, config.max_text_row, yuv.shape[-1]],
         dtype = torch.uint8,
         device = yuv.device
     )
-    bound_low = bound_low_high[0]
-    bound_high = bound_low_high[1]
+    bound_low = bound_low_high[:, 0]
+    bound_high = bound_low_high[:, 1]
 
     grid = lambda meta: (yuv.shape[0], yuv.shape[-1] // meta["block_col"])
     triton_scan_text_boundary[grid](
@@ -228,14 +228,15 @@ def scan_text_boundary(
         config_filter_white_row = config.filter_white_row,
         config_filter_black_row = config.filter_black_row,
     )
-    return bound_low, bound_high
+    return bound_low_high
 
-def filter_text(
+def filter_text_batch(
     yuv: torch.Tensor,
-    bound_low: torch.Tensor,
-    bound_high: torch.Tensor,
-    config: TextFilter
+    bound_low_high: torch.Tensor,
+    config: FilterConfig
 ):
+    bound_low = bound_low_high[:, 0]
+    bound_high = bound_low_high[:, 1]
     out = torch.empty_like(yuv[:, 0])
     grid = lambda meta: (yuv.shape[0], yuv.shape[-1] // meta["block_col"])
     triton_filter_text[grid](
@@ -266,15 +267,9 @@ def filter_text(
     )
     return out
 
-config = TextFilter(
-    block_col = 128,
-    max_text_row = 2,
-
-    range_y_black = 32,
-    range_y_white = 32,
-    range_uv_grey = 2,
-    row_min_keep = 32,
-    row_max_break = 8,
-    filter_white_row = 2,
-    filter_black_row = 4,
-)
+def filter_text_single(
+    yuv: torch.Tensor,
+    bound_low_high: torch.Tensor,
+    config: FilterConfig
+):
+    return filter_text_batch(yuv.unsqueeze(0), bound_low_high.unsqueeze(0), config)[0]
