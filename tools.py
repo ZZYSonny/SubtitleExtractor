@@ -58,7 +58,7 @@ RTX2060Config = SubsConfig(
 
         range_y_black = 24,
         range_y_white = 56,
-        range_uv_grey = 8,
+        range_uv_grey = 16,
         row_min_keep = 4,
         col_min_keep = 4,
         row_max_break = 16,
