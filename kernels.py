@@ -12,6 +12,7 @@ class FilterConfig:
     range_y_white: int
     range_uv_grey: int
     row_min_keep: int
+    col_min_keep: int
     row_max_break: int
     filter_white_row: int
     filter_black_row: int
@@ -47,8 +48,9 @@ def triton_scan_text_boundary(
     config_range_y_black: tl.constexpr,
     config_range_y_white: tl.constexpr,
     config_range_uv_grey: tl.constexpr,
-    config_row_min_keep: tl.constexpr,
     config_row_max_break: tl.constexpr,
+    config_row_min_keep: tl.constexpr,
+    config_col_min_keep: tl.constexpr,
     config_filter_white_row: tl.constexpr,
     config_filter_black_row: tl.constexpr,
 ):
@@ -67,8 +69,9 @@ def triton_scan_text_boundary(
 
     cur_text_row = 0
     bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
-    bound_mid  = tl.full([block_col], 0, dtype=tl.int32)
     bound_high = tl.full([block_col], 0, dtype=tl.int32)
+    last_black = tl.full([block_col], num_row, dtype=tl.int32)
+    last_white = tl.full([block_col], 0, dtype=tl.int32)
     group_high = num_row
 
     for i in range(num_row):
@@ -87,28 +90,27 @@ def triton_scan_text_boundary(
 
         if i - group_high < config_row_max_break:
             bound_i = tl.full([1], i, tl.int32)
-            # If current pixel is black, update the low boundary
-            bound_low = tl.where(black_pixel, tl.minimum(bound_i, bound_low), bound_low)
-            # If current pixel is black, update the high boundary
-            bound_high = tl.where(black_pixel, bound_mid, bound_high)
+            last_black = tl.where(black_pixel, bound_i, last_black)
+            bound_high = tl.where(black_pixel, last_white, bound_high)
             if white_cnt >= config_filter_white_row and black_cnt >= config_filter_black_row:
                 group_high = i
-                # If current pixel is white, update the middle boundary
-                bound_mid = tl.where(white_pixel, bound_i, bound_mid)
+                last_white = tl.where(white_pixel, bound_i, last_white)
+                bound_low = tl.where(white_pixel, tl.minimum(last_black, bound_low), bound_low)
         else:
             # enough contingous white_row
             # decide if stage2 and stage3 is valid
             filtered = (bound_high - bound_low) >= config_row_min_keep
             filtered_cnt = tl.sum(filtered.to(tl.int32), 0)
-            if filtered_cnt > 32:
+            if filtered_cnt > config_col_min_keep:
+                bound_high = tl.where(black_pixel, last_white, bound_high)
                 tl.store(bound_low_ptr + bound_offset + cur_text_row * bound_stride_row, bound_low)
                 tl.store(bound_high_ptr + bound_offset + cur_text_row * bound_stride_row, bound_high)
                 cur_text_row = min(cur_text_row + 1, max_text_row)
             # Reset All
-            bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
-            bound_mid  = tl.full([block_col], 0, dtype=tl.int32)
-            bound_high = tl.full([block_col], 0, dtype=tl.int32)
             group_high = num_row
+            bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
+            bound_high = tl.full([block_col], 0, dtype=tl.int32)
+            
         
         #print("SCAN", group_high, i, black_cnt, white_cnt)
 
@@ -117,10 +119,12 @@ def triton_scan_text_boundary(
         y_offset += yuv_stride_row
     
     for i in range(0, max_text_row):
+        bound_fake_low = tl.full([block_col], num_row, dtype=tl.int32)
+        bound_fake_high = tl.full([block_col], 0, dtype=tl.int32)
         if i>=cur_text_row:
-            out = tl.full([block_col], num_row, dtype=tl.int32)
-            tl.store(bound_low_ptr + bound_offset + i * bound_stride_row, out)
-            tl.store(bound_high_ptr + bound_offset + i * bound_stride_row, out)
+            
+            tl.store(bound_low_ptr + bound_offset + i * bound_stride_row, bound_fake_low)
+            tl.store(bound_high_ptr + bound_offset + i * bound_stride_row, bound_fake_high)
 
 @triton.autotune(
     configs=[
@@ -229,6 +233,7 @@ def scan_text_boundary(
         config_range_y_white = config.range_y_white,
         config_range_uv_grey = config.range_uv_grey,
         config_row_min_keep = config.row_min_keep,
+        config_col_min_keep = config.col_min_keep,
         config_row_max_break = config.row_max_break,
         config_filter_white_row = config.filter_white_row,
         config_filter_black_row = config.filter_black_row,
@@ -273,8 +278,24 @@ def filter_text_batch(
     return out
 
 def filter_text_single(
-    yuv: torch.Tensor,
-    bound_low_high: torch.Tensor,
+    yuv_single: torch.Tensor,
+    bound_low_high_single: torch.Tensor,
     config: FilterConfig
 ):
-    return filter_text_batch(yuv.unsqueeze(0), bound_low_high.unsqueeze(0), config)[0]
+    return filter_text_batch(yuv_single.unsqueeze(0), bound_low_high_single.unsqueeze(0), config)[0]
+
+def filter_bounding_single(
+    filtered_single: torch.Tensor,
+    bound_low_high_single: torch.Tensor
+):
+    bound_low_high_single_cpu = bound_low_high_single.cpu()
+    bound_low = bound_low_high_single_cpu[0]
+    bound_high = bound_low_high_single_cpu[1]
+    bound_valid = (bound_low <= bound_high).any(dim=0)
+    bound_valid_idx = torch.nonzero(bound_valid)
+
+    row_min = bound_low.min().item()
+    row_max = bound_high.max().item()
+    col_min = bound_valid_idx[0].item()
+    col_max = bound_valid_idx[-1].item()
+    return filtered_single[row_min:row_max, col_min:col_max]

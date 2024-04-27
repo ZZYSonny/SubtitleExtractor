@@ -69,26 +69,7 @@ def yuv_to_rgb(frames):
 
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
-    
 
-
-
-#def bounding_box(frame, edge, config: ContourConfig):
-#    return frame
-#    scale_x = min(config.black_x_scale, config.white_x_scale)
-#    scale_y = min(config.black_y_scale, config.white_y_scale)
-#    # Crop the bounding box
-#    def bound_1d(xs, tol):
-#        idx = xs.greater(tol).nonzero()
-#        if idx.size(0) == 0:
-#            return 0,0
-#        else:
-#            r = idx[0].item()
-#            c = idx[-1].item()+1
-#            return r,c
-#    r1, r2 = bound_1d(edge.sum(dim=1, dtype=torch.int32), config.abs_min_x)
-#    c1, c2 = bound_1d(edge.sum(dim=0, dtype=torch.int32), config.abs_min_y)
-#    frame_box = frame[..., scale_x*r1:scale_x*r2, scale_y*c1:scale_y*c2]
 
 def async_iterable(xs, limit=2):
     def async_generator():
@@ -140,16 +121,10 @@ def key_frame_generator(path, config: SubsConfig):
         start_time = cur_time
         start_cnt = cur_cnt
         start_bound = cur_bound
-        start_frame = kernels.filter_text_single(cur_frame, cur_bound, config.filter).cpu().numpy()
+        start_frame = kernels.filter_text_single(cur_frame, cur_bound, config.filter)
+        start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
+        start_frame = start_frame.cpu().numpy()
         if LOGLEVEL == "DEBUG": start_debug = cur_frame.cpu()
-        #start_time_str = round(start_time, 1)
-        #torch.save(cur_frame, f"debug/img/{start_time_str}.pt")
-        #torchvision.io.write_png(yuv_to_rgb(cur_frame).cpu(), f"debug/img/{start_time_str}_in.png")
-        #torchvision.io.write_png(cur_frame[0][None,:].cpu(), f"debug/img/{start_time_str}_y.png")
-        #torchvision.io.write_png(cur_frame[1][None,:].cpu(), f"debug/img/{start_time_str}_u.png")
-        #torchvision.io.write_png(cur_frame[2][None,:].cpu(), f"debug/img/{start_time_str}_v.png")
-        #torchvision.io.write_png(start_edge.unsqueeze(0).to(torch.uint8).mul(255).cpu(), f"debug/img/{start_time_str}_edge.png")
-        #torchvision.io.write_png(torch.from_numpy(start_frame)[None,:], f"debug/img/{start_time_str}_out.png")
 
     def release_key_frame(end_time):
         nonlocal has_start, start_time
@@ -229,7 +204,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
                     "end": key["end"],
                     "ocrs": res_chs
                 }
-            if LOGLEVEL=="DEBUG":
+            elif LOGLEVEL=="DEBUG":
                 time = f"{key['start']:0>6.1f}"
                 text = f"{min_confidence:.2f}_{res_cht}"
                 torchvision.io.write_png(
