@@ -172,7 +172,7 @@ def key_frame_generator(path, config: SubsConfig):
         logger.info("Computing edges")
         yuv = yuv_batch[:]
         bound = kernels.scan_text_boundary(yuv, config.filter)
-        cnt_cpu = (bound[:,1] - bound[:,0]).abs().sum(dim=[1, 2]).cpu().tolist()
+        cnt_cpu = (bound[:,1] - bound[:,0]).clamp_min(0).sum(dim=[1, 2]).cpu().tolist()
         diff_cpu = (bound - start_bound).abs().sum(dim=[1, 2, 3]).cpu().tolist()
         
         if logger.isEnabledFor(logging.DEBUG):
@@ -229,7 +229,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
                     "end": key["end"],
                     "ocrs": res_chs
                 }
-            elif LOGLEVEL=="DEBUG":
+            if LOGLEVEL=="DEBUG":
                 time = f"{key['start']:0>6.1f}"
                 text = f"{min_confidence:.2f}_{res_cht}"
                 torchvision.io.write_png(
@@ -278,34 +278,3 @@ def srt_entry_generator(ocrs):
         f"{time1} --> {time2}",
         last_text
     ])
-
-
-#def debug_contour(path, config: SubsConfig):
-#    os.system("rm debug/img/*.png")
-#    stream = torchaudio.io.StreamReader(path)
-#    stream.add_video_stream(1,
-#                            decoder="h264_cuvid",
-#                            hw_accel="cuda:0",
-#                            decoder_option={
-#                                "crop": "888x0x0x0"
-#                            }
-#                            )
-#
-#    for i, (yuv_batch,) in enumerate(stream.stream()):
-#        #if i!=227: continue
-#        yuv_batch = subtitle_region(yuv_batch)
-#        rgb_batch = yuv_to_rgb(yuv_batch)
-#        edge_batch = subtitle_black_contour(yuv_batch, config.contour)
-#
-#        torchvision.io.write_png(rgb_batch[0].cpu(), f"debug/img/{i}.png")
-#
-#        if edge_batch.sum().item() > edge_batch[0].numel() * config.empty:
-#            rgb_cut = post_process(
-#                rgb_batch[0],
-#                edge_batch[0],
-#                config
-#            )
-#            torchvision.io.write_png(bool_to_grey(
-#                edge_batch).cpu(), f"debug/img/{i}_.png")
-#            torchvision.io.write_png(rgb_cut, f"debug/img/{i}__.png")
-#

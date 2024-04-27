@@ -62,9 +62,8 @@ def triton_scan_text_boundary(
         0
         + bound_stride_batch * tl.program_id(0)
         + bound_stride_col * block_col * tl.program_id(1)
-        + bound_stride_col + tl.arange(0, block_col)
+        + bound_stride_col * tl.arange(0, block_col)
     )
-
 
     cur_text_row = 0
     bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
@@ -86,17 +85,17 @@ def triton_scan_text_boundary(
         black_cnt = tl.sum(black_pixel.to(tl.int32), 0)
         white_cnt = tl.sum(white_pixel.to(tl.int32), 0)
 
-        
-        if white_cnt >= config_filter_white_row and black_cnt >= config_filter_black_row:
-            group_high = i
-            bound_i = tl.full([1], i, tl.uint8)
+        if i - group_high < config_row_max_break:
+            bound_i = tl.full([1], i, tl.int32)
             # If current pixel is black, update the low boundary
             bound_low = tl.where(black_pixel, tl.minimum(bound_i, bound_low), bound_low)
-            # If current pixel is white, update the middle boundary
-            bound_mid = tl.where(white_pixel, bound_i, bound_mid)
             # If current pixel is black, update the high boundary
             bound_high = tl.where(black_pixel, bound_mid, bound_high)
-        elif i - group_high >= config_row_max_break:
+            if white_cnt >= config_filter_white_row and black_cnt >= config_filter_black_row:
+                group_high = i
+                # If current pixel is white, update the middle boundary
+                bound_mid = tl.where(white_pixel, bound_i, bound_mid)
+        else:
             # enough contingous white_row
             # decide if stage2 and stage3 is valid
             filtered = (bound_high - bound_low) >= config_row_min_keep
@@ -116,10 +115,10 @@ def triton_scan_text_boundary(
             
         # Increment offset
         y_offset += yuv_stride_row
-
+    
     for i in range(0, max_text_row):
         if i>=cur_text_row:
-            out = tl.full([block_col], num_row, dtype=tl.uint8)
+            out = tl.full([block_col], num_row, dtype=tl.int32)
             tl.store(bound_low_ptr + bound_offset + i * bound_stride_row, out)
             tl.store(bound_high_ptr + bound_offset + i * bound_stride_row, out)
 
@@ -172,7 +171,7 @@ def triton_filter_text(
         + bound_stride_batch * tl.program_id(0)
         + bound_stride_row * tl.arange(0, max_text_row)[:, None]
         + bound_stride_col * block_col * tl.program_id(1)
-        + bound_stride_col + tl.arange(0, block_col)[None, :]
+        + bound_stride_col * tl.arange(0, block_col)[None, :]
     )
     low = tl.load(bound_low_ptr + bound_offset)
     high = tl.load(bound_high_ptr + bound_offset)
