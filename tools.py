@@ -56,14 +56,14 @@ RTX2060Config = SubsConfig(
         block_col = 512,
         max_text_row = 2,
 
-        range_y_black = 64,
-        range_y_white = 64,
+        range_y_black = 24,
+        range_y_white = 56,
         range_uv_grey = 8,
-        row_min_keep = 2,
-        col_min_keep = 2,
-        row_max_break = 2,
-        filter_white_row = 8,
-        filter_black_row = 8,
+        row_min_keep = 4,
+        col_min_keep = 4,
+        row_max_break = 16,
+        filter_white_row = 4,
+        filter_black_row = 4,
     ),
     ocr = dict(
         # https://www.jaided.ai/easyocr/documentation/

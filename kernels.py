@@ -102,7 +102,6 @@ def triton_scan_text_boundary(
             filtered = (bound_high - bound_low) >= config_row_min_keep
             filtered_cnt = tl.sum(filtered.to(tl.int32), 0)
             if filtered_cnt > config_col_min_keep:
-                bound_high = tl.where(black_pixel, last_white, bound_high)
                 tl.store(bound_low_ptr + bound_offset + cur_text_row * bound_stride_row, bound_low)
                 tl.store(bound_high_ptr + bound_offset + cur_text_row * bound_stride_row, bound_high)
                 cur_text_row = min(cur_text_row + 1, max_text_row)
@@ -298,4 +297,6 @@ def filter_bounding_single(
     row_max = bound_high.max().item()
     col_min = bound_valid_idx[0].item()
     col_max = bound_valid_idx[-1].item()
+    row_max = max(row_max, row_min+1)
+    col_max = max(col_max, col_min+1)
     return filtered_single[row_min:row_max, col_min:col_max]
