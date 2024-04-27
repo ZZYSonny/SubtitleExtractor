@@ -67,9 +67,9 @@ def triton_scan_text_boundary(
 
 
     cur_text_row = 0
-    bound_low  = tl.full([block_col], num_row, dtype=tl.uint8)
-    bound_high = tl.full([block_col], num_row, dtype=tl.uint8)
-    group_low = num_row
+    bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
+    bound_mid  = tl.full([block_col], 0, dtype=tl.int32)
+    bound_high = tl.full([block_col], 0, dtype=tl.int32)
     group_high = num_row
 
     for i in range(num_row):
@@ -83,29 +83,35 @@ def triton_scan_text_boundary(
                      &(v <= tl.full([1], 128+config_range_uv_grey, tl.uint8)))
         black_pixel = (y <= tl.full([1], 000+config_range_y_black, tl.uint8)) & grey_pixel
         white_pixel = (y >= tl.full([1], 255-config_range_y_white, tl.uint8)) & grey_pixel
-        has_black = tl.sum(black_pixel.to(tl.int32), 0) >= config_filter_black_row
-        has_white = tl.sum(white_pixel.to(tl.int32), 0) >= config_filter_white_row
+        black_cnt = tl.sum(black_pixel.to(tl.int32), 0)
+        white_cnt = tl.sum(white_pixel.to(tl.int32), 0)
 
-        if has_white and has_black:
-            group_low = min(group_low, i)
-            group_high = num_row
+        
+        if white_cnt >= config_filter_white_row and black_cnt >= config_filter_black_row:
+            group_high = i
             bound_i = tl.full([1], i, tl.uint8)
-            bound_low = tl.where(white_pixel, tl.minimum(bound_i, bound_low), bound_low)
-            bound_high = tl.where(white_pixel, bound_i, bound_high)
-        else:
-            group_high = min(group_high, i)
+            # If current pixel is black, update the low boundary
+            bound_low = tl.where(black_pixel, tl.minimum(bound_i, bound_low), bound_low)
+            # If current pixel is white, update the middle boundary
+            bound_mid = tl.where(white_pixel, bound_i, bound_mid)
+            # If current pixel is black, update the high boundary
+            bound_high = tl.where(black_pixel, bound_mid, bound_high)
+        elif i - group_high >= config_row_max_break:
             # enough contingous white_row
-            if i - group_high >= config_row_max_break:
-                # decide if stage2 and stage3 is valid
-                if i - group_low >= config_row_min_keep:
-                    tl.store(bound_low_ptr + bound_offset + cur_text_row * bound_stride_row, bound_low)
-                    tl.store(bound_high_ptr + bound_offset + cur_text_row * bound_stride_row, bound_high)
-                    cur_text_row = min(cur_text_row + 1, max_text_row)
-                # Reset All
-                bound_low  = tl.full([block_col], num_row, dtype=tl.uint8)
-                bound_high = tl.full([block_col], num_row, dtype=tl.uint8)
-                group_low = num_row
-                group_high = num_row
+            # decide if stage2 and stage3 is valid
+            filtered = (bound_high - bound_low) >= config_row_min_keep
+            filtered_cnt = tl.sum(filtered.to(tl.int32), 0)
+            if filtered_cnt > 32:
+                tl.store(bound_low_ptr + bound_offset + cur_text_row * bound_stride_row, bound_low)
+                tl.store(bound_high_ptr + bound_offset + cur_text_row * bound_stride_row, bound_high)
+                cur_text_row = min(cur_text_row + 1, max_text_row)
+            # Reset All
+            bound_low  = tl.full([block_col], num_row, dtype=tl.int32)
+            bound_mid  = tl.full([block_col], 0, dtype=tl.int32)
+            bound_high = tl.full([block_col], 0, dtype=tl.int32)
+            group_high = num_row
+        
+        #print("SCAN", group_high, i, black_cnt, white_cnt)
 
             
         # Increment offset
@@ -182,7 +188,7 @@ def triton_filter_text(
                      &(v <= tl.full([1], 128+config_range_uv_grey, tl.uint8)))
         white_pixel = (y >= tl.full([1], 255-config_range_y_white, tl.uint8)) & grey_pixel
         mask = tl.reduce((low <= i) & (i <= high), 0, elementwise_or)
-        out = tl.where(white_pixel & mask, y, tl.full([1], 0, tl.uint8))
+        out = tl.where(white_pixel & mask, y, tl.full([1], 0, tl.int32))
         tl.store(out_offset, out)
 
         y_offset += yuv_stride_row
@@ -195,7 +201,7 @@ def scan_text_boundary(
 ):
     bound_low_high = torch.empty(
         size = [yuv.shape[0], 2, config.max_text_row, yuv.shape[-1]],
-        dtype = torch.uint8,
+        dtype = torch.int32,
         device = yuv.device
     )
     bound_low = bound_low_high[:, 0]

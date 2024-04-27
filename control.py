@@ -172,8 +172,8 @@ def key_frame_generator(path, config: SubsConfig):
         logger.info("Computing edges")
         yuv = yuv_batch[:]
         bound = kernels.scan_text_boundary(yuv, config.filter)
-        cnt_cpu = (bound[:,1] - bound[:,0]).sum(dim=[1, 2], dtype=torch.int32).cpu().tolist()
-        diff_cpu = (bound.int() - start_bound.int()).abs().sum(dim=[1, 2, 3]).cpu().tolist()
+        cnt_cpu = (bound[:,1] - bound[:,0]).abs().sum(dim=[1, 2]).cpu().tolist()
+        diff_cpu = (bound - start_bound).abs().sum(dim=[1, 2, 3]).cpu().tolist()
         
         if logger.isEnabledFor(logging.DEBUG):
             time = [
