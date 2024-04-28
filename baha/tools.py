@@ -1,17 +1,24 @@
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
+
 import functools
 import os.path as osp
 import urllib.request
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
-from control import *
 import http.server
 import socket
 import socketserver
 import requests
 import json
 import tempfile
+import os
+import torch
+import queue
+import threading
+
+
+from . import pipeline
 
 HEADER = {
     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
@@ -29,22 +36,22 @@ HEADER = {
 }
 RSS_URL = "https://api.ani.rip/ani-download.xml"
 #TEMP_DIR = tempfile.TemporaryDirectory(prefix="subs").name
-TEMP_DIR = "./temp"
+TEMP_DIR = ".temp"
 IN_VIDEO_PATH = osp.join(TEMP_DIR, "in.mp4")
 OUT_SUBTITLE_PATH = osp.join(TEMP_DIR, "out.srt")
 OUT_VIDEO_PATH = osp.join(TEMP_DIR, "out.mkv")
 SERVE_HTTP = True
 
-RTX2060Config = SubsConfig(
-    exe = ExecConfig(
+RTX2060Config = pipeline.SubsConfig(
+    exe = pipeline.ExecConfig(
         batch = 3,
         device = "cuda"
     ),
-    key = KeyConfig(
+    key = pipeline.KeyConfig(
         empty=0.003, 
         diff_tol=0.4,
     ),
-    box = CropConfig(
+    box = pipeline.CropConfig(
         top=856,
         down=0,
         left=192,
@@ -52,7 +59,7 @@ RTX2060Config = SubsConfig(
         width=1920,
         height=1080
     ),
-    filter=FilterConfig(
+    filter=pipeline.FilterConfig(
         block_col = 512,
         max_text_row = 2,
 
@@ -116,10 +123,28 @@ def download_anime_from_link(link: str, size: int | None = None):
             pbar.update(len(chunk))
     pbar.close()
 
+def async_iterable(xs, limit=2):
+    def async_generator():
+        q = queue.Queue(limit)
+
+        def decode_worker():
+            for x in xs:
+                q.put(x)
+            q.put(None)
+            q.task_done()
+        threading.Thread(target=decode_worker, daemon=True).start()
+        while True:
+            x = q.get()
+            if x is None: break
+            else: yield x
+
+    if isinstance(xs, list): return xs
+    else: return async_generator()
+
 def convert_subtitle():
-    keys = async_iterable(key_frame_generator(IN_VIDEO_PATH, config))
-    ocrs = async_iterable(ocr_text_generator(keys, config))
-    srts = list(srt_entry_generator(ocrs))
+    keys = async_iterable(pipeline.key_frame_generator(IN_VIDEO_PATH, config))
+    ocrs = async_iterable(pipeline.ocr_text_generator(keys, config))
+    srts = list(pipeline.srt_entry_generator(ocrs))
     with open(OUT_SUBTITLE_PATH, "w") as f:
         print("\n\n".join(srts), file=f)
     torch.cuda.empty_cache()

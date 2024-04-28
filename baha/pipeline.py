@@ -1,19 +1,19 @@
+import os
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+
+
+from tqdm import tqdm
+import numpy as np
 import torch
 import torchvision
 import torchaudio
-from dataclasses import dataclass
-from tqdm import tqdm
 import easyocr
-from datetime import datetime
 import zhconv
-import os
-from tqdm import tqdm
-import queue
-import threading 
-import numpy as np
-import kernels
-from kernels import FilterConfig
+
+from . import kernels
+from .kernels import FilterConfig
 
 LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
 logging.basicConfig(level=LOGLEVEL)
@@ -70,24 +70,6 @@ def yuv_to_rgb(frames):
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
-
-def async_iterable(xs, limit=2):
-    def async_generator():
-        q = queue.Queue(limit)
-
-        def decode_worker():
-            for x in xs:
-                q.put(x)
-            q.put(None)
-            q.task_done()
-        threading.Thread(target=decode_worker, daemon=True).start()
-        while True:
-            x = q.get()
-            if x is None: break
-            else: yield x
-
-    if isinstance(xs, list): return xs
-    else: return async_generator()
 
 def key_frame_generator(path, config: SubsConfig):
     logger = logging.getLogger('KEY')
@@ -210,13 +192,13 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
                 text = f"{min_confidence:.2f}_{res_cht}"
                 torchvision.io.write_png(
                     torch.from_numpy(key["frame"]).unsqueeze(0),
-                    f"debug/error/{time}_out_{text}.png"
+                    f".debug/error/{time}_out_{text}.png"
                 )
                 if key["debug"] is not None:
-                    torch.save(key["debug"], f"debug/error/{time}.pt")
+                    torch.save(key["debug"], f".debug/error/{time}.pt")
                     torchvision.io.write_png(
                         yuv_to_rgb(key["debug"]),
-                        f"debug/error/{time}_in_{text}.png"
+                        f".debug/error/{time}_in_{text}.png"
                     )
 
 

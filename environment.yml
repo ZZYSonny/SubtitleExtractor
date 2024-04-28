@@ -18,6 +18,12 @@ dependencies:
   - torchvision
   - torchaudio
   - easyocr
+  # EN -> CN_SIMP
+  - transformers
+  - accelerate
   - pip
   - pip:
+    - srt
     - zhconv
+    - autoawq
+    

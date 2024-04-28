@@ -1,6 +1,5 @@
-debug
-video
-temp
+.debug
+.temp
 __pycache__
 *.srt
 *.mp4
