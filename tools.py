@@ -5,7 +5,7 @@ import os.path as osp
 import urllib.request
 import xml.etree.ElementTree as ET
 from tqdm import tqdm
-from core import *
+from control import *
 import http.server
 import socket
 import socketserver
@@ -31,8 +31,8 @@ RSS_URL = "https://api.ani.rip/ani-download.xml"
 #TEMP_DIR = tempfile.TemporaryDirectory(prefix="subs").name
 TEMP_DIR = "./temp"
 IN_VIDEO_PATH = osp.join(TEMP_DIR, "in.mp4")
-OUT_SUBTITLE_PATH = osp.join(TEMP_DIR, "in.mp4")
-OUT_VIDEO_PATH = osp.join(TEMP_DIR, "in.mp4")
+OUT_SUBTITLE_PATH = osp.join(TEMP_DIR, "out.srt")
+OUT_VIDEO_PATH = osp.join(TEMP_DIR, "out.mkv")
 SERVE_HTTP = True
 
 RTX2060Config = SubsConfig(
@@ -45,25 +45,25 @@ RTX2060Config = SubsConfig(
         diff_tol=0.4,
     ),
     box = CropConfig(
-        top=888,
+        top=856,
         down=0,
         left=192,
         right=192,
         width=1920,
         height=1080
     ),
-    contour=ContourConfig(
-        y_black_tol=16,
-        y_white_tol=32, 
-        uv_tol=2,
-        white_x_scale=4,
-        white_y_scale=4,
-        white_min=1,
-        black_x_scale=16,
-        black_y_scale=64,
-        black_min=1,
-        abs_min_x=2,
-        abs_min_y=2,
+    filter=FilterConfig(
+        block_col = 512,
+        max_text_row = 2,
+
+        range_y_black = 24,
+        range_y_white = 56,
+        range_uv_grey = 16,
+        row_min_keep = 4,
+        col_min_keep = 4,
+        row_max_break = 16,
+        filter_white_row = 4,
+        filter_black_row = 4,
     ),
     ocr = dict(
         # https://www.jaided.ai/easyocr/documentation/
