@@ -20,7 +20,7 @@ HEADER = {
     "upgrade-insecure-requests": "1"
 }
 
-def get_anime_link_from_ani_xml(name: str):
+def get_link_from_xml(name: str):
     # 获取RSS
     print("下载RSS")
     response = requests.get(f'https://api.ani.rip/ani-download.xml', headers=HEADER)
@@ -35,7 +35,7 @@ def get_anime_link_from_ani_xml(name: str):
 
     raise Exception("未发现视频")
 
-def get_anime_link_from_ani_folder(folder: str, name:str):
+def get_link_from_folder(folder: str, name:str):
     data = '{"password":"null"}'
     print("下载File List")
     response = requests.post(f'https://aniopen.an-i.workers.dev/{folder}/', headers=HEADER, data=data)
@@ -49,7 +49,7 @@ def get_anime_link_from_ani_folder(folder: str, name:str):
             return url, size
     raise Exception("未发现视频")
 
-def download_anime_from_link(path: str, link: str, size: int | None = None):
+def download(path: str, link: str, size: int | None = None):
     response = requests.get(link, headers=HEADER, stream=True)
     pbar = tqdm(desc="下载视频", total=size*1024*1024, unit='B', unit_scale=True)
 
