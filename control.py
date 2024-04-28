@@ -197,7 +197,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
             res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
             min_confidence = min((p[2] for p in res_raw), default=0)
-            if min_confidence >= 0.05:
+            if min_confidence >= 0.08:
                 res_chs = zhconv.convert(res_cht, locale="zh-cn")
                 logger.info("%s", res_chs)
                 yield {
