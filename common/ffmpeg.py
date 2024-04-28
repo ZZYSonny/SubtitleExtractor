@@ -5,6 +5,7 @@ def extract_subs(in_video_path: str, in_subs_path:str):
     os.system(" ".join([
         f"ffmpeg -y",
         f"-i {in_video_path}",
+        f"-map 0:s:m:language:eng",
         f"-c:s text",
         f"{in_subs_path}"
     ]))

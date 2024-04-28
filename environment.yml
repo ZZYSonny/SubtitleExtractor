@@ -8,7 +8,7 @@ dependencies:
   # Basic
   - python=3.10
   - pytorch-cuda==12.1
-  - pytorch==2.3
+  - pytorch==2.2.1
   - ffmpeg
   # Tools
   - ipykernel
@@ -26,4 +26,4 @@ dependencies:
     - srt
     - zhconv
     - autoawq
-    
+    - vllm==0.4.1
