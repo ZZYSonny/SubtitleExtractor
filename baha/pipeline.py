@@ -1,7 +1,7 @@
 import os
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+import datetime
 
 
 from tqdm import tqdm
@@ -11,6 +11,7 @@ import torchvision
 import torchaudio
 import easyocr
 import zhconv
+import srt
 
 from . import kernels
 from .kernels import FilterConfig
@@ -71,9 +72,9 @@ def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
 
-def key_frame_generator(path, config: SubsConfig):
+def key_frame_generator(in_video_path, config: SubsConfig):
     logger = logging.getLogger('KEY')
-    stream = torchaudio.io.StreamReader(path)
+    stream = torchaudio.io.StreamReader(in_video_path)
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
@@ -112,8 +113,8 @@ def key_frame_generator(path, config: SubsConfig):
         nonlocal has_start, start_time
         has_start = False
         key = {
-            "start": start_time,
-            "end": end_time,
+            "start": datetime.timedelta(seconds=start_time),
+            "end": datetime.timedelta(seconds=end_time),
             "frame": start_frame,
             "debug": start_debug
         }
@@ -178,61 +179,48 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
             img = key["frame"]
             res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
+            res_chs = zhconv.convert(res_cht, locale="zh-cn")
             min_confidence = min((p[2] for p in res_raw), default=0)
-            if min_confidence >= 0.08:
-                res_chs = zhconv.convert(res_cht, locale="zh-cn")
-                logger.info("%s", res_chs)
-                yield {
-                    "start": key["start"],
-                    "end": key["end"],
-                    "ocrs": res_chs
-                }
-            elif LOGLEVEL=="DEBUG":
-                time = f"{key['start']:0>6.1f}"
-                text = f"{min_confidence:.2f}_{res_cht}"
-                torchvision.io.write_png(
-                    torch.from_numpy(key["frame"]).unsqueeze(0),
-                    f".debug/error/{time}_out_{text}.png"
-                )
-                if key["debug"] is not None:
-                    torch.save(key["debug"], f".debug/error/{time}.pt")
-                    torchvision.io.write_png(
-                        yuv_to_rgb(key["debug"]),
-                        f".debug/error/{time}_in_{text}.png"
-                    )
+            
+            logger.info("%s", res_chs)
+            key["text"] = res_chs
+            key["conf"] = min_confidence
+            yield key
+
+def debug(key: dict):
+    if LOGLEVEL=="DEBUG":
+        time = str(key["start"]).replace(":", "_")
+        text = str(round(key["conf"], 2)) + "_" + key["text"]
+        torchvision.io.write_png(
+            torch.from_numpy(key["frame"]).unsqueeze(0),
+            f".debug/error/{time}_out_{text}.png"
+        )
+        if key["debug"] is not None:
+            torch.save(key["debug"], f".debug/error/{time}.pt")
+            torchvision.io.write_png(
+                yuv_to_rgb(key["debug"]),
+                f".debug/error/{time}_in_{text}.png"
+            )
 
 
-
-def srt_entry_generator(ocrs):
-    cnt = 1
-    last_start = -1.0
-    last_end = -1.0
-    last_text = ""
-    for i, ocr in tqdm(enumerate(ocrs), desc="SRT", position=2):
-        cur_start = ocr["start"]
-        cur_end = ocr["end"]
-        cur_text = ocr["ocrs"]
-        if last_text == cur_text and cur_start - last_end < 0.1:
-            last_end = cur_end 
+def srt_generator(out_srt_path: str, key_frame_with_text_generator):
+    entries: list[srt.Subtitle]= []
+    
+    for i, key in tqdm(enumerate(key_frame_with_text_generator), desc="SRT", position=2):
+        # Debug Purpose
+        if key["conf"] < 0.05:
+            debug(key)
+        # Generate entry
+        elif len(entries)>0 and key["text"] == entries[-1].content and key["start"] - entries[-1].end < datetime.timedelta(seconds=0.1):
+            entries[-1].end = key["end"]
+            debug(key)
         else:
-            if len(last_text) > 0:
-                time1 = datetime.utcfromtimestamp(
-                    last_start).strftime('%H:%M:%S,%f')[:-3]
-                time2 = datetime.utcfromtimestamp(
-                    last_end).strftime('%H:%M:%S,%f')[:-3]
-                yield "\n".join([
-                    f"{cnt}",
-                    f"{time1} --> {time2}",
-                    last_text
-                ])
-                cnt += 1
-            last_start = cur_start
-            last_end = cur_end
-            last_text = cur_text
-    time1 = datetime.utcfromtimestamp(last_start).strftime('%H:%M:%S,%f')[:-3]
-    time2 = datetime.utcfromtimestamp(last_end).strftime('%H:%M:%S,%f')[:-3]
-    yield "\n".join([
-        f"{cnt}",
-        f"{time1} --> {time2}",
-        last_text
-    ])
+            entries.append(srt.Subtitle(
+                index = 0,
+                start = key["start"],
+                end = key["end"],
+                content = key["text"],
+            ))
+
+    with open(out_srt_path, "w", encoding="utf-8") as f:
+        f.write(srt.compose(entries))
