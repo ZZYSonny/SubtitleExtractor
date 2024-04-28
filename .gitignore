@@ -1,5 +1,6 @@
 .debug
 .temp
+.vscode
 __pycache__
 *.srt
 *.mp4
