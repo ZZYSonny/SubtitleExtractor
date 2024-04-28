@@ -221,7 +221,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
         else:
             entries.append(srt.Subtitle(
                 index = 0,
-                start = key["start"] - datetime.timedelta(seconds=0.01),
+                start = key["start"],
                 end = key["end"],
                 content = key["text"],
             ))
