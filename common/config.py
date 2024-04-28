@@ -24,7 +24,6 @@ def create_temp_dir():
     select_temp_dir(dir)
 
 def clean_temp_dir():
-    if "/tmp" in TEMP_DIR:
-        shutil.rmtree(TEMP_DIR)
+    shutil.rmtree(TEMP_DIR)
 
 create_temp_dir()

@@ -11,4 +11,7 @@ def serve(out_video_path: str):
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=folder_abs_path)
     with socketserver.TCPServer(("", 8000), handler) as httpd:
         print(f"转换完成,视频可通过 http://{ip}:8000/{out_base_name} 下载")
-        httpd.serve_forever()
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("服务器关闭")

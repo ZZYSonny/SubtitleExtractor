@@ -108,7 +108,7 @@ def key_frame_generator(in_video_path, config: SubsConfig):
         start_cnt = cur_cnt
         start_bound = cur_bound
         start_frame = kernels.filter_text_single(cur_frame, cur_bound, config.filter)
-        start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
+        #start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
         start_frame = start_frame.cpu().numpy()
         if LOGLEVEL == "DEBUG": start_debug = cur_frame.cpu()
 
@@ -178,7 +178,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
     for key in tqdm(key_frame_generator, desc="OCR", position=1):
         if 'ocrs' in key: yield key
         else:
-            img = np.pad(key["frame"], pad_width=16, mode='constant', constant_values=0)
+            #img = np.pad(key["frame"], pad_width=32, mode='constant', constant_values=0)
             img = key["frame"]
             res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
@@ -198,7 +198,7 @@ def debug(key: dict):
             torch.from_numpy(key["frame"]).unsqueeze(0),
             f".debug/error/{time}_out_{text}.png"
         )
-        if key["debug"] is not None:
+        if True and key["debug"] is not None:
             torch.save(key["debug"], f".debug/error/{time}.pt")
             torchvision.io.write_png(
                 yuv_to_rgb(key["debug"]),
@@ -212,12 +212,12 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
     pbar = tqdm(desc="SRT", position=2)
     for key in key_frame_with_text_generator:
         #debug(key)
-        if key["conf"] < 0.1:
+        if key["conf"] < 0.2:
             debug(key)
         # Generate entry
         elif len(entries)>0 and key["text"] == entries[-1].content and key["start"] - entries[-1].end < datetime.timedelta(seconds=0.1):
             entries[-1].end = key["end"]
-            debug(key)
+            #debug(key)
         else:
             entries.append(srt.Subtitle(
                 index = 0,
