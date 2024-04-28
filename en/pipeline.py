@@ -36,7 +36,7 @@ def translate_srt_hf(in_path: str, out_path:str, config: Config):
     print("Loading Model")
     model = transformers.AutoModelForCausalLM.from_pretrained(
         config.model_name,
-        torch_dtype=config.model_dtype,
+        torch_dtype="auto",
         device_map=config.model_device,
         low_cpu_mem_usage=True
     )
@@ -79,7 +79,8 @@ def translate_srt_vllm(in_path: str, out_path:str, config: Config):
         model=config.model_name, 
         tokenizer=config.model_name, 
         dtype=config.model_dtype, 
-        max_model_len=128*4, 
+        quantization="awq" if "-AWQ" in config.model_name else None,
+        max_model_len=256, 
         enforce_eager=True
     )
     print("Loading Tokenizer")
