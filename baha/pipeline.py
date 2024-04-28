@@ -1,4 +1,3 @@
-import xml.etree.ElementTree as ET
 import torch
 import queue
 import threading
@@ -7,12 +6,13 @@ from . import stages
 
 config = stages.SubsConfig(
     exe = stages.ExecConfig(
-        batch = 3,
+        batch = 6,
         device = "cuda"
     ),
     key = stages.KeyConfig(
-        empty=0.003, 
-        diff_tol=0.4,
+        empty_ratio=0.003,
+        diff_ratio=0.4,
+        diff_cd=0.4
     ),
     box = stages.CropConfig(
         top=856,

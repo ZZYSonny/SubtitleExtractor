@@ -37,8 +37,9 @@ class ExecConfig:
 
 @dataclass
 class KeyConfig:
-    empty: float
-    diff_tol: float
+    empty_ratio: float
+    diff_ratio: float
+    diff_cd: float
 
 @dataclass
 class SubsConfig:
@@ -100,6 +101,8 @@ def key_frame_generator(in_video_path, config: SubsConfig):
 
     def select_key_frame(cur_time, cur_cnt, cur_frame, cur_bound):
         nonlocal start_time, start_cnt, start_frame, start_debug, start_bound, has_start
+        if has_start and cur_time - start_time < config.key.diff_cd:
+            return
         has_start = True
         start_time = cur_time
         start_cnt = cur_cnt
@@ -122,7 +125,7 @@ def key_frame_generator(in_video_path, config: SubsConfig):
         return key
         
     resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
-    threshold_empty = int(config.key.empty * resolution_native)
+    threshold_empty = int(config.key.empty_ratio * resolution_native)
     logger.info("Decoding video")
     for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
         pts = yuv_batch.pts
@@ -158,7 +161,7 @@ def key_frame_generator(in_video_path, config: SubsConfig):
                     logger.info("Text -> Empty at %s", cur_time)
                     yield release_key_frame(cur_time)
                     break
-                if diff_cpu[i] > config.key.diff_tol * min(start_cnt, cnt_cpu[i]):
+                if diff_cpu[i] > config.key.diff_ratio * min(start_cnt, cnt_cpu[i]):
                     cur_time = pts + i / fps
                     logger.info("Text -> New at %s", cur_time)
                     yield release_key_frame(cur_time)
@@ -208,7 +211,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
     
     for i, key in tqdm(enumerate(key_frame_with_text_generator), desc="SRT", position=2):
         # Debug Purpose
-        if key["conf"] < 0.05:
+        if key["conf"] < 0.075:
             debug(key)
         # Generate entry
         elif len(entries)>0 and key["text"] == entries[-1].content and key["start"] - entries[-1].end < datetime.timedelta(seconds=0.1):
@@ -217,7 +220,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
         else:
             entries.append(srt.Subtitle(
                 index = 0,
-                start = key["start"],
+                start = key["start"] - datetime.timedelta(seconds=0.01),
                 end = key["end"],
                 content = key["text"],
             ))
