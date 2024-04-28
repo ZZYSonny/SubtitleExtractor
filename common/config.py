@@ -21,7 +21,10 @@ def select_temp_dir(dir: str):
 
 def create_temp_dir():
     dir = tempfile.mkdtemp(prefix="subs")
-    atexit.register(lambda: shutil.rmtree(dir))
     select_temp_dir(dir)
+
+def clean_temp_dir():
+    if "/tmp" in TEMP_DIR:
+        shutil.rmtree(TEMP_DIR)
 
 create_temp_dir()
