@@ -13,6 +13,7 @@ def extract_subs(in_video_path: str, in_subs_path:str):
 
 
 def merge_subs(in_video_path: str, out_subs_path: str, out_video_path: str):
+    print("Merging")
     os.system(" ".join([
         f"ffmpeg -y",
         f"-loglevel error",

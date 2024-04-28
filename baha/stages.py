@@ -212,7 +212,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
     pbar = tqdm(desc="SRT", position=2)
     for key in key_frame_with_text_generator:
         #debug(key)
-        if key["conf"] < 0.075:
+        if key["conf"] < 0.1:
             debug(key)
         # Generate entry
         elif len(entries)>0 and key["text"] == entries[-1].content and key["start"] - entries[-1].end < datetime.timedelta(seconds=0.1):

@@ -311,6 +311,6 @@ def filter_bounding_single(
     row_max = bound_high.max().item()
     col_min = bound_valid_idx[0].item()
     col_max = bound_valid_idx[-1].item()
-    row_max = max(row_max, row_min+1)
-    col_max = max(col_max, col_min+1)
+    row_max = max(row_max, row_min+32)
+    col_max = max(col_max, col_min+32)
     return filtered_single[row_min:row_max, col_min:col_max]
