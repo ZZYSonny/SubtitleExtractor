@@ -19,9 +19,10 @@ config = Config(
     model_dtype = torch.float16,
     model_device = "cuda",
     model_prompt = (
-        "将下面一句对话翻译成中文。"
+        "你的任务是将下面的英文对话翻译成中文，"
+        "你的回答只能包含翻译后的中文。"
         "你要翻译的这句对话来自一部二次元番剧。"
-        "因此你的翻译需要尽可能简洁，贴近中文语境下的口语，不要使用书面语。"
+        "因此你的翻译需要尽可能简洁，贴近中文语境下的口语，不要使用任何书面语。"
         "不要翻译番剧中的角色名、地名、人名、专业术语等。"
         "再一次强调，你的翻译需要尽可能贴近口语，下面是你要翻译的句子："
     ),
@@ -80,7 +81,7 @@ def translate_srt_vllm(in_path: str, out_path:str, config: Config):
         tokenizer=config.model_name, 
         dtype=config.model_dtype, 
         quantization="awq" if "-AWQ" in config.model_name else None,
-        max_model_len=256, 
+        max_model_len=360, 
         enforce_eager=True
     )
     print("Loading Tokenizer")
@@ -93,7 +94,7 @@ def translate_srt_vllm(in_path: str, out_path:str, config: Config):
         tokenizer.apply_chat_template(
             [
                 {"role": "system", "content": config.model_prompt},
-                {"role": "user", "content": entry.content}
+                {"role": "user", "content": entry.content.replace("\n"," ")}
             ],
             tokenize=False,
             add_generation_prompt=True
