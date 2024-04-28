@@ -185,7 +185,7 @@ def ocr_text_generator(key_frame_generator, config: SubsConfig):
             res_chs = zhconv.convert(res_cht, locale="zh-cn")
             min_confidence = min((p[2] for p in res_raw), default=0)
             
-            logger.info("%s", res_chs)
+            logger.info("OCR %f %s",min_confidence, res_chs)
             key["text"] = res_chs
             key["conf"] = min_confidence
             yield key
@@ -209,8 +209,9 @@ def debug(key: dict):
 def srt_generator(out_srt_path: str, key_frame_with_text_generator):
     entries: list[srt.Subtitle]= []
     
-    for i, key in tqdm(enumerate(key_frame_with_text_generator), desc="SRT", position=2):
-        # Debug Purpose
+    pbar = tqdm(desc="SRT", position=2)
+    for key in key_frame_with_text_generator:
+        #debug(key)
         if key["conf"] < 0.075:
             debug(key)
         # Generate entry
@@ -224,6 +225,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator):
                 end = key["end"],
                 content = key["text"],
             ))
+            pbar.update(1)
 
     with open(out_srt_path, "w", encoding="utf-8") as f:
         f.write(srt.compose(entries))

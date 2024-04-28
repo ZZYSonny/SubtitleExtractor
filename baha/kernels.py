@@ -155,8 +155,10 @@ def triton_filter_text(
     out_stride_row: tl.constexpr,
     out_stride_col: tl.constexpr,
 
+    config_range_y_black: tl.constexpr,
     config_range_y_white: tl.constexpr,
     config_range_uv_grey: tl.constexpr,
+    config_row_max_break: tl.constexpr,
 ):
     out_offset = (
         out_ptr
@@ -179,6 +181,7 @@ def triton_filter_text(
     )
     low = tl.load(bound_low_ptr + bound_offset)
     high = tl.load(bound_high_ptr + bound_offset)
+    last_black = tl.full([block_col], -num_row, tl.int32)
 
     for i in range(num_row):
         y = tl.load(y_offset)
@@ -189,10 +192,18 @@ def triton_filter_text(
                      &(u <= tl.full([1], 128+config_range_uv_grey, tl.uint8))
                      &(v >= tl.full([1], 128-config_range_uv_grey, tl.uint8))
                      &(v <= tl.full([1], 128+config_range_uv_grey, tl.uint8)))
+        black_pixel = (y <= tl.full([1], 000+config_range_y_black, tl.uint8)) & grey_pixel
         white_pixel = (y >= tl.full([1], 255-config_range_y_white, tl.uint8)) & grey_pixel
-        mask = tl.reduce((low <= i) & (i <= high), 0, elementwise_or)
-        out = tl.where(white_pixel & mask, y, tl.full([1], 0, tl.int32))
+
+        mask_pos = tl.reduce((low <= i) & (i <= high), 0, elementwise_or)
+        mask_black = (i - last_black) <= config_row_max_break
+        
+        out = tl.where(white_pixel & mask_pos & mask_black, y, tl.full([1], 0, tl.int32))
         tl.store(out_offset, out)
+
+        bound_i = tl.full([1], i, tl.int32)
+        last_black = tl.where(white_pixel & mask_black, bound_i, last_black)
+        last_black = tl.where(black_pixel, bound_i, last_black)
 
         y_offset += yuv_stride_row
         out_offset += out_stride_row
@@ -272,8 +283,10 @@ def filter_text_batch(
         out_stride_row = out.stride(1),
         out_stride_col = out.stride(2),
 
+        config_range_y_black = config.range_y_black,
         config_range_y_white = config.range_y_white,
         config_range_uv_grey = config.range_uv_grey,
+        config_row_max_break = config.row_max_break
     )
     return out
 
