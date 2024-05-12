@@ -228,11 +228,11 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator, config: Full
             #debug(key)
         else:
             start_mod = max(
-                key["start"] - datetime.timedelta(seconds=config.sub.fix_delta_sec),
+                key["start"] + datetime.timedelta(seconds=config.sub.fix_delta_sec),
                 datetime.timedelta(seconds=0)
             )
             end_mod = max(
-                key["end"] - datetime.timedelta(seconds=config.sub.fix_delta_sec),
+                key["end"] + datetime.timedelta(seconds=config.sub.fix_delta_sec),
                 datetime.timedelta(seconds=0)
             )
             entries.append(srt.Subtitle(
