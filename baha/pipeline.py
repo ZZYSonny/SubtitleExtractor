@@ -4,7 +4,7 @@ import threading
 
 from . import stages
 
-config = stages.SubsConfig(
+config = stages.FullConfig(
     exe = stages.ExecConfig(
         batch = 6,
         device = "cuda"
@@ -43,6 +43,11 @@ config = stages.SubsConfig(
         # https://github.com/clovaai/CRAFT-pytorch/issues/51
         #text_threshold=0.3,
         #low_text=0.2
+    ),
+    sub=stages.SubsConfig(
+        min_conf=0.2,
+        fix_delta_sec=-0.01,
+        merge_max_sec=0.1
     )
 )
 
@@ -67,7 +72,7 @@ def async_iterable(xs, limit=2):
 def convert_subtitle(in_video_path: str, out_sub_path: str):
     keys = async_iterable(stages.key_frame_generator(in_video_path, config))
     ocrs = async_iterable(stages.ocr_text_generator(keys, config))
-    srts = stages.srt_generator(out_sub_path, ocrs)
+    srts = stages.srt_generator(out_sub_path, ocrs, config)
     torch.cuda.empty_cache()
 
     

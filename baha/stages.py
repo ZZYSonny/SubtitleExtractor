@@ -43,11 +43,18 @@ class KeyConfig:
 
 @dataclass
 class SubsConfig:
+    min_conf: float
+    fix_delta_sec: float
+    merge_max_sec: float
+
+@dataclass
+class FullConfig:
     exe: ExecConfig
     key: KeyConfig
     box: CropConfig
     filter: FilterConfig
     ocr: dict
+    sub: SubsConfig
 
 
 def yuv_to_rgb(frames):
@@ -73,7 +80,7 @@ def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
 
-def key_frame_generator(in_video_path, config: SubsConfig):
+def key_frame_generator(in_video_path, config: FullConfig):
     logger = logging.getLogger('KEY')
     stream = torchaudio.io.StreamReader(in_video_path)
 
@@ -172,7 +179,7 @@ def key_frame_generator(in_video_path, config: SubsConfig):
     if start_time>0:
         yield release_key_frame(num_frame/fps)
 
-def ocr_text_generator(key_frame_generator, config: SubsConfig):
+def ocr_text_generator(key_frame_generator, config: FullConfig):
     logger = logging.getLogger('OCR')
     logger.info("Loading EasyOCR Model")
     for key in tqdm(key_frame_generator, desc="OCR", position=1):
@@ -206,23 +213,32 @@ def debug(key: dict):
             )
 
 
-def srt_generator(out_srt_path: str, key_frame_with_text_generator):
+def srt_generator(out_srt_path: str, key_frame_with_text_generator, config: FullConfig):
     entries: list[srt.Subtitle]= []
     
     pbar = tqdm(desc="SRT", position=2)
     for key in key_frame_with_text_generator:
         #debug(key)
-        if key["conf"] < 0.2:
+        if key["conf"] < config.sub.min_conf:
             debug(key)
         # Generate entry
-        elif len(entries)>0 and key["text"] == entries[-1].content and key["start"] - entries[-1].end < datetime.timedelta(seconds=0.1):
+        elif (len(entries)>0 and key["text"] == entries[-1].content 
+        and key["start"] - entries[-1].end < datetime.timedelta(seconds=config.sub.merge_max_sec)):
             entries[-1].end = key["end"]
             #debug(key)
         else:
+            start_mod = max(
+                key["start"] - datetime.timedelta(seconds=config.sub.fix_delta_sec),
+                datetime.timedelta(seconds=0)
+            )
+            end_mod = max(
+                key["end"] - datetime.timedelta(seconds=config.sub.fix_delta_sec),
+                datetime.timedelta(seconds=0)
+            )
             entries.append(srt.Subtitle(
                 index = 0,
-                start = key["start"],
-                end = key["end"],
+                start = start_mod,
+                end = end_mod,
                 content = key["text"],
             ))
             pbar.update(1)
