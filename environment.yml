@@ -27,3 +27,4 @@ dependencies:
     - zhconv
     - autoawq
     - vllm==0.4.1
+    - git+https://github.com/sustcsonglin/flash-linear-attention
