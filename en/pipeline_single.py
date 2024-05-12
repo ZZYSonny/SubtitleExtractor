@@ -82,7 +82,8 @@ def translate_srt_vllm(in_path: str, out_path:str, config: Config):
         dtype=config.model_dtype, 
         quantization="awq" if "-AWQ" in config.model_name else None,
         max_model_len=360, 
-        enforce_eager=True
+        enforce_eager=True,
+        enable_prefix_caching=True
     )
     print("Loading Tokenizer")
     tokenizer = transformers.AutoTokenizer.from_pretrained(config.model_name)

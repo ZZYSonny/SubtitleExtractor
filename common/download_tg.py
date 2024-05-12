@@ -33,5 +33,6 @@ def download(path: str, link: str):
         f"/usr/bin/tdl dl",
         f"-u {link}",
         f"-d {fdir}",
-        f"--template '{fname}'"
+        f"--template '{fname}'",
+        #f"--continue"
     ]))
