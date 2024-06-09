@@ -9,7 +9,7 @@ dependencies:
   - python=3.10
   - pytorch-cuda==12.1
   - pytorch==2.2.1
-  - ffmpeg
+  - ffmpeg=6
   # Tools
   - ipykernel
   - matplotlib

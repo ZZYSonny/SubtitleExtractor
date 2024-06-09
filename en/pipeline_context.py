@@ -16,7 +16,7 @@ class Config:
     
 
 config = Config(
-    model_name = "Qwen/Qwen1.5-1.8B-Chat",
+    model_name = "Qwen/Qwen2-1.5B-Instruct",
     model_dtype = torch.float16,
     model_device = "cuda",
     sample_params=vllm.SamplingParams(temperature=0, top_k=3),
