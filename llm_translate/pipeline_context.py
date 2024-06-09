@@ -20,8 +20,9 @@ config = Config(
     model_dtype = torch.float16,
     model_device = "cuda",
     sample_params=vllm.SamplingParams(temperature=0, top_k=3),
+    
     prompt_template = (
-        "你的任务是将下面的英文对话翻译成中文，"
+        "你的任务是将下面的{lang_source}对话翻译成中文，"
         "你的回答只能包含翻译后的中文。"
         "你要翻译的这句对话来自一部二次元番剧。"
         "故事的背景是: {background}"
@@ -32,6 +33,7 @@ config = Config(
     ),
     prompt_map = {
         "background": "Please Set me in main.py",
+        "lang_source":  "Please Set me in main.py"
     }
 )
 
