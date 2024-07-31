@@ -27,13 +27,14 @@ config = Config(
         "你要翻译的这句对话来自一部二次元番剧。"
         "故事的背景是: {background}"
         "因此你的翻译需要尽可能简洁，贴近中文语境下的口语，不要使用任何书面语。"
-        "不要翻译番剧中的角色名、地名、人名、专业术语等。"
+        "不要翻译番剧中的角色名、地名、人名、专业术语等，比如{no_translate}。"
         "再一次强调，你的翻译需要尽可能贴近口语。"
         "对话的背景是: {history}"
     ),
     prompt_map = {
         "background": "Please Set me in main.py",
-        "lang_source":  "Please Set me in main.py"
+        "lang_source":  "Please Set me in main.py",
+        "no_translate":  "Please Set me in main.py"
     }
 )
 

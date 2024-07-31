@@ -1,3 +1,4 @@
+import os
 import os.path as osp
 import socket
 import functools
@@ -15,3 +16,6 @@ def serve(out_video_path: str):
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("服务器关闭")
+
+def open_in_explorer(out_video_path: str):
+    os.system(f"xdg-open {out_video_path}")
