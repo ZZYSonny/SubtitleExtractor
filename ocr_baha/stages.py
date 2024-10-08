@@ -16,9 +16,9 @@ import srt
 from . import kernels
 from .kernels import FilterConfig
 
-LOGLEVEL = os.environ.get('LOGLEVEL', 'ERROR').upper()
+LOGLEVEL = os.environ.get("LOGLEVEL", "ERROR").upper()
 logging.basicConfig(level=LOGLEVEL)
-reader = easyocr.Reader(['ch_tra'])
+reader = easyocr.Reader(["ch_tra"])
 
 
 @dataclass
@@ -30,10 +30,12 @@ class CropConfig:
     width: int
     height: int
 
+
 @dataclass
 class ExecConfig:
     batch: int
     device: str = "cuda"
+
 
 @dataclass
 class KeyConfig:
@@ -41,11 +43,13 @@ class KeyConfig:
     diff_ratio: float
     diff_cd: float
 
+
 @dataclass
 class SubsConfig:
     min_conf: float
     fix_delta_sec: float
     merge_max_sec: float
+
 
 @dataclass
 class FullConfig:
@@ -81,24 +85,25 @@ def bool_to_grey(frames: torch.Tensor):
 
 
 def key_frame_generator(in_video_path, config: FullConfig):
-    logger = logging.getLogger('KEY')
+    logger = logging.getLogger("KEY")
     stream = torchaudio.io.StreamReader(in_video_path)
 
     info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
     num_batch = int((num_frame + config.exe.batch - 1) // config.exe.batch)
-    assert (info.codec == "h264")
-    assert (info.format == "yuv420p")
+    assert info.codec == "h264"
+    assert info.format == "yuv420p"
 
     fps = info.frame_rate
-    stream.add_video_stream(config.exe.batch,
-                            decoder="h264_cuvid",
-                            hw_accel="cuda:0",
-                            decoder_option={
-                                "crop": f"{config.box.top}x{config.box.down}x{config.box.left}x{config.box.left}x{config.box.right}"
-                            },
-                            #filter_desc=f"fps={fps}"
-                            )
+    stream.add_video_stream(
+        512,
+        decoder="h264_cuvid",
+        hw_accel="cuda:0",
+        decoder_option={
+            "crop": f"{config.box.top}x{config.box.down}x{config.box.left}x{config.box.left}x{config.box.right}"
+        },
+        # filter_desc=f"fps={fps}"
+    )
     has_start = False
     start_time = 0.0
     start_cnt = 0
@@ -115,9 +120,10 @@ def key_frame_generator(in_video_path, config: FullConfig):
         start_cnt = cur_cnt
         start_bound = cur_bound
         start_frame = kernels.filter_text_single(cur_frame, cur_bound, config.filter)
-        #start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
+        # start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
         start_frame = start_frame.cpu().numpy()
-        if LOGLEVEL == "DEBUG": start_debug = cur_frame.cpu()
+        if LOGLEVEL == "DEBUG":
+            start_debug = cur_frame.cpu()
 
     def release_key_frame(end_time):
         nonlocal has_start, start_time
@@ -126,29 +132,30 @@ def key_frame_generator(in_video_path, config: FullConfig):
             "start": datetime.timedelta(seconds=start_time),
             "end": datetime.timedelta(seconds=end_time),
             "frame": start_frame,
-            "debug": start_debug
+            "debug": start_debug,
         }
         start_time = 0.0
         return key
-        
-    resolution_native = (config.box.width - config.box.left - config.box.right) * (config.box.height - config.box.top - config.box.down)
+
+    resolution_native = (config.box.width - config.box.left - config.box.right) * (
+        config.box.height - config.box.top - config.box.down
+    )
     threshold_empty = int(config.key.empty_ratio * resolution_native)
     logger.info("Decoding video")
-    for (yuv_batch, ) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
+    for (yuv_batch,) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
         pts = yuv_batch.pts
 
         logger.info("Computing edges")
         yuv = yuv_batch[:]
         bound = kernels.scan_text_boundary(yuv, config.filter)
-        cnt_cpu = (bound[:,1] - bound[:,0]).clamp_min(0).sum(dim=[1, 2]).cpu().tolist()
+        cnt_cpu = (
+            (bound[:, 1] - bound[:, 0]).clamp_min(0).sum(dim=[1, 2]).cpu().tolist()
+        )
         diff_cpu = (bound - start_bound).abs().sum(dim=[1, 2, 3]).cpu().tolist()
-        
+
         if logger.isEnabledFor(logging.DEBUG):
-            time = [
-                pts + i / fps
-                for i in range(yuv.size(0))
-            ]
-            logger.debug("="*20)
+            time = [pts + i / fps for i in range(yuv.size(0))]
+            logger.debug("=" * 20)
             logger.debug("Time:%s", time)
             logger.debug("Pixs:%s", cnt_cpu)
             logger.debug("Diff:%s", diff_cpu)
@@ -176,71 +183,79 @@ def key_frame_generator(in_video_path, config: FullConfig):
                     break
 
     stream.remove_stream(0)
-    if start_time>0:
-        yield release_key_frame(num_frame/fps)
+    if start_time > 0:
+        yield release_key_frame(num_frame / fps)
+
 
 def ocr_text_generator(key_frame_generator, config: FullConfig):
-    logger = logging.getLogger('OCR')
+    logger = logging.getLogger("OCR")
     logger.info("Loading EasyOCR Model")
     for key in tqdm(key_frame_generator, desc="OCR", position=1):
-        if 'ocrs' in key: yield key
+        if "ocrs" in key:
+            yield key
         else:
-            #img = np.pad(key["frame"], pad_width=32, mode='constant', constant_values=0)
+            # img = np.pad(key["frame"], pad_width=32, mode='constant', constant_values=0)
             img = key["frame"]
             res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
             res_chs = zhconv.convert(res_cht, locale="zh-cn")
             min_confidence = min((p[2] for p in res_raw), default=0)
-            
-            logger.info("OCR %f %s",min_confidence, res_chs)
+
+            logger.info("OCR %f %s", min_confidence, res_chs)
             key["text"] = res_chs
             key["conf"] = min_confidence
             yield key
 
+
 def debug(key: dict):
-    if LOGLEVEL=="DEBUG":
+    if LOGLEVEL == "DEBUG":
         time = str(key["start"]).replace(":", "_")
         text = str(round(key["conf"], 2)) + "_" + key["text"]
         torchvision.io.write_png(
             torch.from_numpy(key["frame"]).unsqueeze(0),
-            f".debug/error/{time}_out_{text}.png"
+            f".debug/error/{time}_out_{text}.png",
         )
         if True and key["debug"] is not None:
             torch.save(key["debug"], f".debug/error/{time}.pt")
             torchvision.io.write_png(
-                yuv_to_rgb(key["debug"]),
-                f".debug/error/{time}_in_{text}.png"
+                yuv_to_rgb(key["debug"]), f".debug/error/{time}_in_{text}.png"
             )
 
 
 def srt_generator(out_srt_path: str, key_frame_with_text_generator, config: FullConfig):
-    entries: list[srt.Subtitle]= []
-    
+    entries: list[srt.Subtitle] = []
+
     pbar = tqdm(desc="SRT", position=2)
     for key in key_frame_with_text_generator:
-        #debug(key)
+        # debug(key)
         if key["conf"] < config.sub.min_conf:
             debug(key)
         # Generate entry
-        elif (len(entries)>0 and key["text"] == entries[-1].content 
-        and key["start"] - entries[-1].end < datetime.timedelta(seconds=config.sub.merge_max_sec)):
+        elif (
+            len(entries) > 0
+            and key["text"] == entries[-1].content
+            and key["start"] - entries[-1].end
+            < datetime.timedelta(seconds=config.sub.merge_max_sec)
+        ):
             entries[-1].end = key["end"]
-            #debug(key)
+            # debug(key)
         else:
             start_mod = max(
                 key["start"] + datetime.timedelta(seconds=config.sub.fix_delta_sec),
-                datetime.timedelta(seconds=0)
+                datetime.timedelta(seconds=0),
             )
             end_mod = max(
                 key["end"] + datetime.timedelta(seconds=config.sub.fix_delta_sec),
-                datetime.timedelta(seconds=0)
+                datetime.timedelta(seconds=0),
             )
-            entries.append(srt.Subtitle(
-                index = 0,
-                start = start_mod,
-                end = end_mod,
-                content = key["text"],
-            ))
+            entries.append(
+                srt.Subtitle(
+                    index=0,
+                    start=start_mod,
+                    end=end_mod,
+                    content=key["text"],
+                )
+            )
             pbar.update(1)
 
     with open(out_srt_path, "w", encoding="utf-8") as f:
