@@ -7,17 +7,8 @@ import triton.language as tl
 
 @dataclass
 class FilterConfig:
-    block_col: int
-    max_text_row: int
-
-    range_y_black: int
     range_y_white: int
     range_uv_grey: int
-    row_min_keep: int
-    col_min_keep: int
-    row_max_break: int
-    filter_white_row: int
-    filter_black_row: int
 
 
 @triton.jit

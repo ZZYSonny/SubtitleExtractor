@@ -61,6 +61,7 @@ class FullConfig:
     sub: SubsConfig
 
 
+@torch.compile
 def yuv_to_rgb(frames):
     frames = frames.to(torch.float)
     y = frames[..., 0, :, :]
@@ -80,23 +81,24 @@ def yuv_to_rgb(frames):
     return rgb
 
 
-def single_mask(yuv):
+@torch.compile
+def single_mask(yuv, config: FilterConfig):
     y, u, v = yuv
-    a = 19
-    b = 1
     return (
-        (y >= 255 - a)
-        & (u >= 128 - b)
-        & (u <= 128 + b)
-        & (v >= 128 - b)
-        & (v <= 128 + b)
+        (y >= 255 - config.range_y_white)
+        & (u >= 128 - config.range_uv_grey)
+        & (u <= 128 + config.range_uv_grey)
+        & (v >= 128 - config.range_uv_grey)
+        & (v <= 128 + config.range_uv_grey)
     )
 
 
-def combine_mask(last, yuv):
-    return last & single_mask(yuv)
+@torch.compile
+def combine_mask(last, yuv, config: FilterConfig):
+    return last & single_mask(yuv, config)
 
 
+@torch.compile
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
@@ -132,7 +134,7 @@ def key_frame_generator(in_video_path, config: FullConfig):
     def select_key_frame(cur_time, cur_frame):
         nonlocal start_time, start_cnt, start_frame, start_mask
         assert start_time is None
-        mask = single_mask(cur_frame)
+        mask = single_mask(cur_frame, config.filter)
         cnt = mask.sum(dtype=torch.int).item()
         if cnt > threshold_empty:
             start_time = cur_time
@@ -170,7 +172,7 @@ def key_frame_generator(in_video_path, config: FullConfig):
         if start_time is None:
             select_key_frame(pts, yuv[0])
         else:
-            cur_mask = combine_mask(start_mask, yuv[0])
+            cur_mask = combine_mask(start_mask, yuv[0], config.filter)
             cur_cnt = cur_mask.sum().item()
             if cur_cnt < threshold_empty:
                 yield from release_key_frame(pts)

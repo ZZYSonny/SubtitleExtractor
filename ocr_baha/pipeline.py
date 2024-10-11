@@ -11,16 +11,8 @@ config = stages.FullConfig(
         top=856, down=0, left=192, right=192, width=1920, height=1080
     ),
     filter=stages.FilterConfig(
-        block_col=512,
-        max_text_row=2,
-        range_y_black=24,
-        range_y_white=56,
-        range_uv_grey=16,
-        row_min_keep=4,
-        col_min_keep=4,
-        row_max_break=16,
-        filter_white_row=4,
-        filter_black_row=4,
+        range_y_white=19,
+        range_uv_grey=1,
     ),
     ocr=dict(
         # https://www.jaided.ai/easyocr/documentation/
