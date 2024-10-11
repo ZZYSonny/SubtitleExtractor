@@ -80,6 +80,23 @@ def yuv_to_rgb(frames):
     return rgb
 
 
+def single_mask(yuv):
+    y, u, v = yuv
+    a = 19
+    b = 1
+    return (
+        (y >= 255 - a)
+        & (u >= 128 - b)
+        & (u <= 128 + b)
+        & (v >= 128 - b)
+        & (v <= 128 + b)
+    )
+
+
+def combine_mask(last, yuv):
+    return last & single_mask(yuv)
+
+
 def bool_to_grey(frames: torch.Tensor):
     return frames.to(torch.uint8).mul(255)
 
@@ -88,15 +105,18 @@ def key_frame_generator(in_video_path, config: FullConfig):
     logger = logging.getLogger("KEY")
     stream = torchaudio.io.StreamReader(in_video_path)
 
-    info = stream.get_src_stream_info(0)
     num_frame = stream.get_src_stream_info(0).num_frames
-    num_batch = int((num_frame + config.exe.batch - 1) // config.exe.batch)
+    info = stream.get_src_stream_info(0)
+    fps = info.frame_rate
     assert info.codec == "h264"
     assert info.format == "yuv420p"
+    resolution_native = (config.box.width - config.box.left - config.box.right) * (
+        config.box.height - config.box.top - config.box.down
+    )
+    threshold_empty = int(config.key.empty_ratio * resolution_native)
 
-    fps = info.frame_rate
     stream.add_video_stream(
-        512,
+        config.exe.batch,
         decoder="h264_cuvid",
         hw_accel="cuda:0",
         decoder_option={
@@ -104,87 +124,60 @@ def key_frame_generator(in_video_path, config: FullConfig):
         },
         # filter_desc=f"fps={fps}"
     )
-    has_start = False
-    start_time = 0.0
+    start_time = None
+    start_frame = None
+    start_mask = None
     start_cnt = 0
-    start_debug = None
-    start_frame = torch.empty(0, device="cpu")
-    start_bound = torch.empty(1, device="cuda:0")
 
-    def select_key_frame(cur_time, cur_cnt, cur_frame, cur_bound):
-        nonlocal start_time, start_cnt, start_frame, start_debug, start_bound, has_start
-        if has_start and cur_time - start_time < config.key.diff_cd:
-            return
-        has_start = True
-        start_time = cur_time
-        start_cnt = cur_cnt
-        start_bound = cur_bound
-        start_frame = kernels.filter_text_single(cur_frame, cur_bound, config.filter)
-        # start_frame = kernels.filter_bounding_single(start_frame, cur_bound)
-        start_frame = start_frame.cpu().numpy()
-        if LOGLEVEL == "DEBUG":
-            start_debug = cur_frame.cpu()
+    def select_key_frame(cur_time, cur_frame):
+        nonlocal start_time, start_cnt, start_frame, start_mask
+        assert start_time is None
+        mask = single_mask(cur_frame)
+        cnt = mask.sum(dtype=torch.int).item()
+        if cnt > threshold_empty:
+            start_time = cur_time
+            start_frame = cur_frame
+            start_mask = mask
+            start_cnt = cnt
 
     def release_key_frame(end_time):
-        nonlocal has_start, start_time
-        has_start = False
-        key = {
-            "start": datetime.timedelta(seconds=start_time),
-            "end": datetime.timedelta(seconds=end_time),
-            "frame": start_frame,
-            "debug": start_debug,
-        }
-        start_time = 0.0
-        return key
+        nonlocal start_time, start_frame, start_mask, start_cnt
+        assert start_time is not None
 
-    resolution_native = (config.box.width - config.box.left - config.box.right) * (
-        config.box.height - config.box.top - config.box.down
-    )
-    threshold_empty = int(config.key.empty_ratio * resolution_native)
+        # processed = torch.where(start_mask, start_frame[0], 0)
+        key = None
+        if end_time - start_time > config.key.diff_cd:
+            key = {
+                "start": datetime.timedelta(seconds=start_time),
+                "end": datetime.timedelta(seconds=end_time),
+                "frame": start_frame[0].cpu().numpy(),
+                "debug": start_frame.cpu().numpy(),
+            }
+        start_time = None
+        start_frame = None
+        start_mask = None
+        start_cnt = 0
+
+        if key is not None:
+            yield key
+
     logger.info("Decoding video")
-    for (yuv_batch,) in tqdm(stream.stream(), total=num_batch, desc="Key", position=0):
-        pts = yuv_batch.pts
+    for (yuv,) in tqdm(stream.stream(), total=num_frame, desc="Key", position=0):
+        if yuv is None:
+            continue
+        pts = yuv.pts
 
-        logger.info("Computing edges")
-        yuv = yuv_batch[:]
-        bound = kernels.scan_text_boundary(yuv, config.filter)
-        cnt_cpu = (
-            (bound[:, 1] - bound[:, 0]).clamp_min(0).sum(dim=[1, 2]).cpu().tolist()
-        )
-        diff_cpu = (bound - start_bound).abs().sum(dim=[1, 2, 3]).cpu().tolist()
-
-        if logger.isEnabledFor(logging.DEBUG):
-            time = [pts + i / fps for i in range(yuv.size(0))]
-            logger.debug("=" * 20)
-            logger.debug("Time:%s", time)
-            logger.debug("Pixs:%s", cnt_cpu)
-            logger.debug("Diff:%s", diff_cpu)
-
-        # Assume in a batch, the state changes at most once.
-        if not has_start:
-            for i in range(yuv.size(0)):
-                if cnt_cpu[i] > threshold_empty:
-                    cur_time = pts + i / fps
-                    logger.info("Empty -> Text at %s", cur_time)
-                    select_key_frame(cur_time, cnt_cpu[i], yuv[i], bound[i])
-                    break
+        if start_time is None:
+            select_key_frame(pts, yuv[0])
         else:
-            for i in range(yuv.size(0)):
-                if cnt_cpu[i] < threshold_empty:
-                    cur_time = pts + i / fps
-                    logger.info("Text -> Empty at %s", cur_time)
-                    yield release_key_frame(cur_time)
-                    break
-                if diff_cpu[i] > config.key.diff_ratio * min(start_cnt, cnt_cpu[i]):
-                    cur_time = pts + i / fps
-                    logger.info("Text -> New at %s", cur_time)
-                    yield release_key_frame(cur_time)
-                    select_key_frame(cur_time, cnt_cpu[i], yuv[i], bound[i])
-                    break
+            cur_mask = combine_mask(start_mask, yuv[0])
+            cur_cnt = cur_mask.sum().item()
+            if cur_cnt < threshold_empty:
+                yield from release_key_frame(pts)
 
     stream.remove_stream(0)
-    if start_time > 0:
-        yield release_key_frame(num_frame / fps)
+    if start_time is not None:
+        yield from release_key_frame(num_frame / fps)
 
 
 def ocr_text_generator(key_frame_generator, config: FullConfig):
@@ -196,6 +189,8 @@ def ocr_text_generator(key_frame_generator, config: FullConfig):
         else:
             # img = np.pad(key["frame"], pad_width=32, mode='constant', constant_values=0)
             img = key["frame"]
+            if img is None:
+                return None
             res_raw = reader.readtext(img, detail=True, paragraph=False, **config.ocr)
             res_cht = "\n".join(p[1] for p in res_raw)
             res_chs = zhconv.convert(res_cht, locale="zh-cn")
@@ -218,7 +213,8 @@ def debug(key: dict):
         if True and key["debug"] is not None:
             torch.save(key["debug"], f".debug/error/{time}.pt")
             torchvision.io.write_png(
-                yuv_to_rgb(key["debug"]), f".debug/error/{time}_in_{text}.png"
+                torch.from_numpy(key["debug"][0]).unsqueeze(0),
+                f".debug/error/{time}_in_{text}.png",
             )
 
 
@@ -238,7 +234,7 @@ def srt_generator(out_srt_path: str, key_frame_with_text_generator, config: Full
             < datetime.timedelta(seconds=config.sub.merge_max_sec)
         ):
             entries[-1].end = key["end"]
-            # debug(key)
+            debug(key)
         else:
             start_mod = max(
                 key["start"] + datetime.timedelta(seconds=config.sub.fix_delta_sec),
