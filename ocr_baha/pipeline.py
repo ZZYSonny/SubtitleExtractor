@@ -6,7 +6,7 @@ from . import stages
 
 config = stages.FullConfig(
     exe=stages.ExecConfig(batch=1, device="cuda"),
-    key=stages.KeyConfig(empty_ratio=0.003, diff_ratio=0.4, diff_cd=1),
+    key=stages.KeyConfig(empty_ratio=0.003, diff_ratio=0.4, diff_cd=0.8),
     box=stages.CropConfig(
         top=856, down=0, left=192, right=192, width=1920, height=1080
     ),

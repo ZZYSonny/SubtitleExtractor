@@ -46,6 +46,7 @@ def prepend_subs(in_video_path: str, out_subs_path: str, out_video_path: str):
                 f"-i {in_video_path}",
                 f"-i {out_subs_path}",
                 f"-map 1",
+                f"-c copy",
                 f"-map 0",
                 f"-c copy",
                 f"-metadata:s:s:0 language=zh-CN",

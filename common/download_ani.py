@@ -47,14 +47,14 @@ def get_link_from_folder(folder: str, name: str):
     data = '{"password":"null"}'
     print("下载File List")
     response = requests.post(
-        f"https://aniopen.an-i.workers.dev/{folder}/", headers=HEADER, data=data
+        f"https://openani.an-i.workers.dev/{folder}/", headers=HEADER, data=data
     )
 
     for info in json.loads(response.text)["files"]:
         if name in info["name"]:
             print(f"发现视频 {info['name']}")
             encoded = urllib.parse.quote(info["name"])
-            url = f"https://aniopen.an-i.workers.dev/{folder}/{encoded}"
+            url = f"https://openani.an-i.workers.dev/{folder}/{encoded}"
             size = int(float(info["size"]) / 1024 / 1024)
             return url, size
     raise Exception("未发现视频")
