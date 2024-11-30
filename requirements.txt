@@ -1,0 +1,11 @@
+easyocr
+torchvision
+torchaudio
+
+requests
+ipykernel
+matplotlib
+tqdm
+
+srt
+zhconv
