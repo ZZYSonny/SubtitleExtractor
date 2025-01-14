@@ -1,4 +1,5 @@
 easyocr
+torch==2.4.*
 torchvision
 torchaudio
 

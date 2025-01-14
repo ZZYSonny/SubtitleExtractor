@@ -23,7 +23,7 @@ config = stages.FullConfig(
         # text_threshold=0.3,
         # low_text=0.2
     ),
-    sub=stages.SubsConfig(min_conf=0.2, fix_delta_sec=-0.01, merge_max_sec=0.1),
+    sub=stages.SubsConfig(min_conf=0.2, fix_delta_sec=-0.05, merge_max_sec=0.1),
 )
 
 
